@@ -1,0 +1,27 @@
+# ── 비밀값 / 개인 정보 (절대 커밋 금지) ─────────────────────
+.streamlit/secrets.toml
+.env
+*.session
+
+# 실제 바스켓 구성 (예시 파일: basket_watchlist.example.json)
+basket_watchlist.json
+# v2_etf_scanner.py 가 생성하는 후보 목록(검토 후 basket_watchlist.json 에 직접 반영)
+basket_watchlist.scanned.json
+
+# ── 자동 생성물: 일봉·토큰 캐시·종목마스터·연산 결과·대시보드는 전부 data/·state/·results/ 아래 ───
+data/
+state/
+results/
+
+# V2_DATA_DIR/V2_RESULTS_DIR 로 다른 위치에 만들 때를 대비한 안전망
+kis_token_cache.json
+*.parquet
+*.log
+
+# ── python / 환경 ────────────────────────────────────────
+__pycache__/
+*.pyc
+.venv/
+venv/
+.idea/
+.vscode/

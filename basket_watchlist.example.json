@@ -1,0 +1,30 @@
+{
+  "_설명": "예시 파일입니다. basket_watchlist.json 으로 복사해 실제 종목·타겟 ETF로 고쳐 쓰세요 (basket_watchlist.json 은 .gitignore 대상). V1 watchlist.json 처럼 종목마다 theme(섹터) 태그만 붙이면, themes 블록에 지정한 타겟 ETF와 묶여 테마별로 바스켓이 자동 생성됩니다 — baskets 배열을 손으로 만들 필요가 없습니다.",
+  "_필드": "stocks[].theme = themes 의 키(섹터명). themes.<섹터>.target = 그 섹터가 예측할 ETF. themes.<섹터>.basket_name = data/·results/ 폴더명으로 쓸 영문 식별자(선택, 생략하면 섹터명 그대로 사용). target 이 없는 섹터는 바스켓이 만들어지지 않고 조용히 건너뜁니다(아직 타겟 ETF를 못 정했을 때 유용).",
+  "_수정후": "python kis_client.py verify  →  python v2_run.py  (3단계를 한 번에 실행)",
+
+  "stocks": [
+    {"code": "005930", "name": "삼성전자", "theme": "코스피 대형"},
+    {"code": "000660", "name": "SK하이닉스", "theme": "코스피 대형"},
+    {"code": "373220", "name": "LG에너지솔루션", "theme": "코스피 대형"},
+    {"code": "207940", "name": "삼성바이오로직스", "theme": "코스피 대형"},
+    {"code": "005380", "name": "현대차", "theme": "코스피 대형"},
+    {"code": "068270", "name": "셀트리온", "theme": "코스피 대형"},
+    {"code": "000270", "name": "기아", "theme": "코스피 대형"},
+    {"code": "005490", "name": "POSCO홀딩스", "theme": "코스피 대형"},
+    {"code": "035420", "name": "NAVER", "theme": "코스피 대형"},
+    {"code": "051910", "name": "LG화학", "theme": "코스피 대형"},
+
+    {"code": "005930", "name": "삼성전자", "theme": "반도체"},
+    {"code": "000660", "name": "SK하이닉스", "theme": "반도체"},
+    {"code": "058470", "name": "리노공업", "theme": "반도체"},
+    {"code": "039030", "name": "이오테크닉스", "theme": "반도체"},
+    {"code": "095340", "name": "ISC", "theme": "반도체"},
+    {"code": "403870", "name": "HPSP", "theme": "반도체"}
+  ],
+
+  "themes": {
+    "코스피 대형": {"basket_name": "kospi_top10_to_etf", "target": {"code": "069500", "name": "KODEX 200"}},
+    "반도체": {"basket_name": "semiconductor_to_etf", "target": {"code": "091160", "name": "KODEX 반도체"}}
+  }
+}
