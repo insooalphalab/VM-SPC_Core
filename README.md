@@ -28,6 +28,8 @@ Hotelling's T² : 바스켓 평균 4개 신호 간 상관관계 붕괴(복합 �
 core/         — 공용 인프라: KIS 인증·API 클라이언트, 경로/Params 설정, 칼만·CUSUM·T²·신호 계산,
                 ETF 스캐너. 두 파이프라인(vm_predict, pair_spc) 모두 이 폴더에 의존합니다.
 vm_predict/   — 예측모델(VM-SPC) 파이프라인: Stage1 수집 → Stage2 연산 → Stage3 대시보드 렌더링
+vm_spc/       — 챔피언-챌린저(VM-SPC Core) 의사결정 보조 모델: Layer2 피처 → Walk-Forward → 3-분기 게이트.
+                dashboard_v2.html 에 "챔피언-챌린저" 탭으로 결과를 얹습니다.
 pair_spc/     — 대표종목 상관관계(PAIR-SPC) 파이프라인(신규): Stage0 대표종목 실증 → Stage1/2
                 공적분·SPC. vm_predict의 dashboard_v2.html에 탭으로 결과를 얹습니다.
 data/ results/ state/  — 이전과 동일하게 프로젝트 루트에 그대로 있습니다(폴더 이동과 무관)
@@ -42,6 +44,7 @@ copy basket_watchlist.example.json basket_watchlist.json           # 실제 종�
 python core/kis_client.py verify                                   # 종목코드↔종목명 검증
 python vm_predict/v2_run.py                                        # 예측모델: 수집→연산→렌더링 한 번에
 python pair_spc/run_pair_spc.py                                    # PAIR-SPC: 대표종목 실증→공적분·SPC (선택)
+python vm_spc/pipeline.py                                          # 챔피언-챌린저: 3-Way 벤치마크→게이트 판정 (선택)
 ```
 
 `results/{바스켓이름}/dashboard_v2.html`을 더블클릭해 브라우저로 엽니다(서버 불필요) — 상단
@@ -90,6 +93,34 @@ python vm_predict/v2_explain.py --basket semiconductor_to_etf --report # 오늘�
 python core/v2_etf_scanner.py                    # 전체 ETF(~1,100여개) 스캔 — 수십 분 소요
 python core/v2_etf_scanner.py --limit 60         # 동작만 빠르게 확인하고 싶을 때
 ```
+
+### 챔피언-챌린저: VM-SPC Core 의사결정 보조 모델 (선택)
+
+Layer 2 피처 5종(칼만 잔차·가격 Z·CUSUM·Hotelling T²·공적분 잔차 Z)으로 종목별 익일 상대순위
+(그날 바스켓 내 상위 40%=아웃퍼폼/하위 40%=언더퍼폼)를 예측하는 세 모델(Legacy 룰 / Ridge
+Baseline / LightGBM Challenger, 조기종료 적용)을 Walk-Forward(학습 250일 → Embargo 10일 → 검증
+60일, 60일씩 슬라이딩)로 비교하고, Gate 1(High-Conf Precision ≥60% & 95% CI 하한 >50% & 표본
+≥30건)·Gate 2(오컴의 면도날: Challenger가 +3%p 이상 & CI 하한으로 우위 확인될 때만 채택)로
+챔피언을 정합니다. 통과해도 "고신뢰"가 아니라 "통계적으로 확인된 약한 방향성 참고 신호"입니다.
+자동 주문은 없고, 장 마감 후 한 번 돌려 익일 시나리오 라인을 사람이 보고 판단합니다.
+
+라벨링 방식 비교(절대방향 vs 상대순위)·Gate 재보정·LightGBM 과적합 진단 등 설계 검증 과정은
+`VM_SPC_Core_검증이력.md` 에 따로 정리했습니다.
+
+```powershell
+python vm_spc/pipeline.py                                  # 전체 바스켓(상대순위 기본) → 대시보드 반영
+python vm_spc/pipeline.py --basket semiconductor_krx_scan  # 특정 바스켓만 (대표 예시)
+python vm_spc/pipeline.py --label-mode absolute            # 비교용 구버전 라벨링(별도 파일에 저장)
+```
+
+- Stage1 이 저장한 `data/{바스켓}/*.csv` 만 읽습니다(API 호출 없음). 유효 거래일이 280일 미만이라
+  fold 를 못 만드는 바스켓은 건너뜁니다.
+- 한계: Point-in-time 구성종목 이력이 없어 현재 구성종목으로 근사합니다(생존편향, `vm_spc/universe.py`
+  의 `POINT_IN_TIME_HISTORY` 를 채우면 해소). `coint_z` 는 ETF-ex-A 대신 타겟 ETF 대비 롤링 OLS
+  스프레드입니다. 둘 다 대시보드 탭의 "검증 설정 · 한계"에 표시됩니다.
+- **현재 결과**: 검증 가능한 18개 바스켓 중 BASELINE 채택 9 / REJECTED 8 / CHALLENGER 채택 1.
+  대표 예시는 `semiconductor_krx_scan`(타겟 KODEX 반도체) — 예측모델·PAIR-SPC·챔피언-챌린저
+  3개 탭이 전부 실데이터로 채워진 유일한 바스켓입니다.
 
 ### PAIR-SPC: 섹터 대표종목 실증 + 공적분 SPC (신규, 선택)
 
@@ -151,6 +182,19 @@ python pair_spc/pair_cointegration.py --basket <이름>              # Stage 1/2
 | `pair_representativeness.py` | Stage 0 — ex-self 지수 대조로 섹터 대표종목 실증 |
 | `pair_cointegration.py` | Stage 1/2 — OLS 공적분 회귀·ADF·Half-life·히스테리시스 SPC |
 | `pair_config.py` | PAIR-SPC 전용 경로·`PairParams` |
+
+### vm_spc/ — 챔피언-챌린저(VM-SPC Core)
+
+| 파일 | 역할 |
+|---|---|
+| `pipeline.py` | EOD 오케스트레이션 엔트리포인트 (피처→레이블→Walk-Forward→판정→시나리오 JSON) |
+| `features.py` | Layer 2 피처 5종 — core/ 칼만·CUSUM·T² 함수를 재사용하는 wrapper |
+| `labeling.py` | 라벨링 — 상대순위(기본) / 절대방향(±0.2% 데드존, 비교용) |
+| `universe.py` | Point-in-time 유니버스 (이력 미확보 시 현재 구성종목 근사 + 생존편향 경고) |
+| `splitter.py` | Walk-Forward + Purge/Embargo 분할 |
+| `models/` | `legacy_rule.py`(VM Score≥0.75) / `ridge_baseline.py` / `lgbm_challenger.py`(조기종료 적용) |
+| `evaluation.py` | Tier1/2 지표·Brier·F1 + 날짜 클러스터 부트스트랩 CI(B=1000) |
+| `gate_decision.py` | 3-분기 Gated Two-Stage 챔피언 판정 |
 
 ### 루트
 

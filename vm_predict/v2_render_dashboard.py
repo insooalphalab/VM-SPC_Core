@@ -55,18 +55,20 @@ TEMPLATE = r"""<!DOCTYPE html>
 </head>
 <body class="p-4 md:p-6">
   <header class="card p-4 mb-4">
-    <h1 class="text-xl font-bold text-white mb-1">VM-SPC V2 — 반도체 FDC 관리도의 주식 데이터 이식</h1>
-    <p class="text-xs text-slate-400 mb-2">SPC 관리도(CUSUM + Hotelling's T&sup2;)를 주식 데이터에 적용해
-      추세전환·상관관계붕괴를 인과적으로 탐지합니다.</p>
+    <h1 class="text-xl font-bold text-white mb-1">VM-SPC Core</h1>
     __HEADER_HTML__
-    __HIGHLIGHTS_HTML__
-    __REPORT_HTML__
+    __CHAMP_SUMMARY_HTML__
     <details class="mt-3 text-xs text-slate-400">
-      <summary class="text-cyan-400 font-medium">읽는 법 — Panel 1(예측)과 Panel 2&ndash;4(탐지)는 다른 신호입니다</summary>
-      <p class="mt-1 pl-4">Panel 1만 <span class="text-slate-200">사전 예측</span>입니다 — 오늘 breadth로 아직
-        안 온 내일(T+1) 방향을 추정합니다. Panel 2&ndash;4는 <span class="text-slate-200">사후 탐지</span>입니다 —
-        "내일 어떻게 될지"가 아니라 "이미 진행되던 이탈이 이 시점에 확인됐다"는 뒤늦은 진단이라, 알람 난 날이
-        실제 변곡점이 아니라 며칠~몇 주 전 이탈이 누적돼 드러난 시점입니다.</p>
+      <summary class="text-cyan-400 font-medium cursor-pointer">예측모델(Legacy) 세부 지표 · 일일 리포트 · 읽는 법</summary>
+      <div class="mt-2">
+        __SENSORS_HTML__
+        __HIGHLIGHTS_HTML__
+        __REPORT_HTML__
+        <p class="mt-3 pl-1">Panel 1만 <span class="text-slate-200">사전 예측</span>입니다 — 오늘 breadth로 아직
+          안 온 내일(T+1) 방향을 추정합니다. Panel 2&ndash;4는 <span class="text-slate-200">사후 탐지</span>입니다 —
+          "내일 어떻게 될지"가 아니라 "이미 진행되던 이탈이 이 시점에 확인됐다"는 뒤늦은 진단이라, 알람 난 날이
+          실제 변곡점이 아니라 며칠~몇 주 전 이탈이 누적돼 드러난 시점입니다.</p>
+      </div>
     </details>
   </header>
 
@@ -107,6 +109,10 @@ TEMPLATE = r"""<!DOCTYPE html>
     __PAIR_TAB_CONTENT__
   </div>
 
+  <div id="tab-content-champ" class="hidden">
+    __CHAMP_TAB_CONTENT__
+  </div>
+
   <p class="text-xs text-slate-600 mt-4">V1(5대시그널 스코어카드)의 칼만필터·신호 계산을 그대로 이어받아 실제로 쓰는 도구입니다.
     반도체 FAB 공정관리(FDC)의 SPC 관리도(CUSUM·Hotelling's T&sup2;) 기법에서 착안해 설계했습니다.</p>
 
@@ -114,20 +120,20 @@ TEMPLATE = r"""<!DOCTYPE html>
   <script>
     const DATA = JSON.parse(document.getElementById('v2-data').textContent);
 
-    // ── 탭 전환 (예측모델 ↔ 대표종목 상관관계) ────────────────────────
-    let pairRendered = false;
+    // ── 탭 전환 (예측모델 / 대표종목 상관관계 / 챔피언-챌린저) ───────────────
+    // 숨겨진 div 안에서는 차트 크기를 못 재므로, 각 탭 차트는 처음 열 때 한 번만 그린다.
+    const TABS = ['vm', 'pair', 'champ'];
+    const tabRendered = { vm: true };
+    const tabRenderers = { pair: () => renderPairTab(), champ: () => renderChampTab() };
     function showTab(name) {
-      document.getElementById('tab-content-vm').classList.toggle('hidden', name !== 'vm');
-      document.getElementById('tab-content-pair').classList.toggle('hidden', name !== 'pair');
-      const btnVm = document.getElementById('tab-btn-vm'), btnPair = document.getElementById('tab-btn-pair');
-      if (btnVm) btnVm.classList.toggle('bg-cyan-600', name === 'vm');
-      if (btnVm) btnVm.classList.toggle('bg-slate-700', name !== 'vm');
-      if (btnPair) btnPair.classList.toggle('bg-cyan-600', name === 'pair');
-      if (btnPair) btnPair.classList.toggle('bg-slate-700', name !== 'pair');
-      if (name === 'pair' && !pairRendered) { renderPairTab(); pairRendered = true; }
+      for (const t of TABS) {
+        document.getElementById(`tab-content-${t}`)?.classList.toggle('hidden', name !== t);
+        const btn = document.getElementById(`tab-btn-${t}`);
+        if (btn) { btn.classList.toggle('bg-cyan-600', name === t); btn.classList.toggle('bg-slate-700', name !== t); }
+      }
+      if (!tabRendered[name]) { tabRenderers[name]?.(); tabRendered[name] = true; }
     }
-    document.getElementById('tab-btn-vm')?.addEventListener('click', () => showTab('vm'));
-    document.getElementById('tab-btn-pair')?.addEventListener('click', () => showTab('pair'));
+    for (const t of TABS) document.getElementById(`tab-btn-${t}`)?.addEventListener('click', () => showTab(t));
 
     // ── Panel 1: 오늘 기준 실시간 예측 카드 ───────────────────────────
     (function () {
@@ -337,6 +343,72 @@ TEMPLATE = r"""<!DOCTYPE html>
         },
       });
     }
+
+    // ── 챔피언-챌린저 탭: fold별 High-Conf Precision + 변수기여도 ───────────
+    function renderChampTab() {
+      const c = DATA.vm_spc;
+      if (!c) return;
+      const gate1 = c.config.gate1;
+      const pctOrNull = v => v === null || v === undefined ? null : v * 100;
+      new Chart(document.getElementById('champ-chart-folds'), {
+        data: {
+          labels: c.folds.map(f => `F${f.fold} ${f.test_start.slice(2, 7)}~${f.test_end.slice(2, 7)}`),
+          datasets: [
+            { type: 'bar', label: 'Baseline (Ridge)', data: c.folds.map(f => pctOrNull(f.baseline.high_conf_precision)),
+              backgroundColor: '#06b6d4' },
+            { type: 'bar', label: 'Challenger (LGBM)', data: c.folds.map(f => pctOrNull(f.challenger.high_conf_precision)),
+              backgroundColor: '#a855f7' },
+            { type: 'line', label: `Gate 1 (${(gate1 * 100).toFixed(0)}%)`, data: c.folds.map(() => gate1 * 100),
+              borderColor: '#f59e0b', borderDash: [6, 4], pointRadius: 0, borderWidth: 1.5 },
+          ],
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          scales: {
+            x: { ticks: { color: '#94a3b8', font: { size: 10 } }, grid: { color: '#334155' } },
+            // fold 표본이 작아 0%·100%가 실제로 나온다(실측 확인됨) — 축을 좁게 고정하면 그 값이
+            // 잘려서 다른 값과 구분이 안 간다. 0~100% 전체를 항상 보여준다.
+            y: { min: 0, max: 100, ticks: { color: '#94a3b8', callback: v => v + '%' }, grid: { color: '#334155' } },
+          },
+          plugins: {
+            legend: { labels: { color: '#cbd5e1', boxWidth: 12, font: { size: 10 } } },
+            tooltip: { callbacks: { afterLabel: ctx => {
+              const f = c.folds[ctx.dataIndex];
+              const m = ctx.datasetIndex === 0 ? f.baseline : ctx.datasetIndex === 1 ? f.challenger : null;
+              return m ? `S_core ${m.n_s_core}건` : '';
+            } } },
+          },
+        },
+      });
+
+      const labels = c.feature_labels;
+      const feats = Object.keys(labels);
+      const barOpts = (xTitle) => ({
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        scales: {
+          x: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' },
+               title: { display: true, text: xTitle, color: '#94a3b8', font: { size: 10 } } },
+          y: { ticks: { color: '#cbd5e1' }, grid: { display: false } },
+        },
+        plugins: { legend: { display: false } },
+      });
+      const coef = feats.map(f => c.contributions.ridge_std_coef[f]);
+      new Chart(document.getElementById('champ-chart-ridge'), {
+        type: 'bar',
+        data: { labels: feats.map(f => labels[f]),
+                datasets: [{ data: coef, backgroundColor: coef.map(v => v >= 0 ? '#10b981' : '#ef4444') }] },
+        options: barOpts('표준화 계수 (1σ당 로그오즈, +는 상승 쪽)'),
+      });
+      const g = c.contributions.lgbm_gain_share;
+      new Chart(document.getElementById('champ-chart-lgbm'), {
+        type: 'bar',
+        data: { labels: [...feats.map(f => labels[f]), '종목 ID(통제)'],
+                datasets: [{ data: [...feats.map(f => g[f] * 100), g._ticker * 100],
+                             backgroundColor: [...feats.map(() => '#a855f7'), '#475569'] }] },
+        options: barOpts('split gain 비중 (%)'),
+      });
+    }
   </script>
 </body>
 </html>
@@ -437,13 +509,19 @@ def _report_html(payload: dict) -> str:
 
 
 def _tab_buttons_html(payload: dict) -> str:
-    if not payload.get("pair"):
+    """결과가 있는 탭만 버튼을 만든다. 추가 탭이 하나도 없으면 탭 바 자체를 숨긴다(하위 호환)."""
+    tabs = [("vm", "예측모델 (VM-SPC)")]
+    if payload.get("pair"):
+        tabs.append(("pair", "대표종목 상관관계 (PAIR-SPC)"))
+    if payload.get("vm_spc"):
+        tabs.append(("champ", "챔피언-챌린저 (VM-SPC Core)"))
+    if len(tabs) == 1:
         return ""
-    return """
-    <div class="flex gap-2 mb-4">
-      <button id="tab-btn-vm" class="px-3 py-1.5 rounded-lg text-sm font-medium bg-cyan-600 text-white">예측모델 (VM-SPC)</button>
-      <button id="tab-btn-pair" class="px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-700 text-slate-300">대표종목 상관관계 (PAIR-SPC)</button>
-    </div>"""
+    buttons = "".join(
+        f'<button id="tab-btn-{key}" class="px-3 py-1.5 rounded-lg text-sm font-medium text-white '
+        f'{"bg-cyan-600" if i == 0 else "bg-slate-700"}">{label}</button>'
+        for i, (key, label) in enumerate(tabs))
+    return f'\n    <div class="flex flex-wrap gap-2 mb-4">{buttons}</div>'
 
 
 def _candidates_table_html(candidates: list, selected_code: str | None = None) -> str:
@@ -590,6 +668,294 @@ def _pair_tab_content_html(payload: dict) -> str:
     </div>"""
 
 
+_CHAMP_LABEL = {"BASELINE": "Baseline (Ridge Logistic)", "CHALLENGER": "Challenger (LightGBM)",
+                "REJECTED": "최종 기각 — Legacy 룰만 운영"}
+_CHAMP_BANNER_CLS = {"REJECTED": "border-amber-500/50 bg-amber-500/10 text-amber-300",
+                     "BASELINE": "border-cyan-500/50 bg-cyan-500/10 text-cyan-300",
+                     "CHALLENGER": "border-purple-500/50 bg-purple-500/10 text-purple-300"}
+
+
+def _pct(v, digits: int = 1) -> str:
+    return "—" if v is None else f"{v * 100:.{digits}f}%"
+
+
+def _label_mode_desc(cfg: dict) -> str:
+    """라벨링 모드 설명 한 줄 — vm_spc/labeling.py 의 absolute/relative 옵션에 대응."""
+    if cfg.get("label_mode") == "relative" and cfg.get("relative_rank"):
+        r = cfg["relative_rank"]
+        return (f"상대순위: 그날 바스켓 내 상위 {r['top_frac']:.0%}=아웃퍼폼(1) / 하위 {r['bot_frac']:.0%}=언더퍼폼(0), "
+                f"중간은 학습&middot;검증에서 제외(유효종목 {r['min_active']}개 미만인 날도 제외)")
+    dz = cfg.get("deadzone") or [0, 0]
+    return f"데드존: {dz[0]:+.1%} &lt; R(t+1) &lt; {dz[1]:+.1%} 은 학습&middot;검증에서 제외"
+
+
+def _gate_chip(ok: bool | None, text: str) -> str:
+    if ok is None:
+        cls, mark = "border-slate-600 bg-slate-700/30 text-slate-500", "·"
+    elif ok:
+        cls, mark = "border-emerald-500/50 bg-emerald-500/10 text-emerald-300", "&#10003;"
+    else:
+        cls, mark = "border-red-500/50 bg-red-500/10 text-red-300", "&#10007;"
+    return f'<div class="rounded-lg border {cls} px-3 py-2 text-xs"><span class="font-bold mr-1">{mark}</span>{text}</div>'
+
+
+def _champ_benchmark_table(c: dict) -> str:
+    m, cfg = c["metrics"], c["config"]
+    champ = c["decision"]["champion"]
+    cols = [("legacy", f"Legacy Rule<br><span class='text-slate-500 font-normal'>VM Score&ge;{cfg['legacy_threshold']}</span>"),
+            ("baseline", "Baseline<br><span class='text-slate-500 font-normal'>Ridge Logistic</span>"),
+            ("challenger", "Challenger<br><span class='text-slate-500 font-normal'>LightGBM</span>")]
+
+    def ci(x):
+        lo, hi = x.get("ci_lower"), x.get("ci_upper")
+        return "—" if lo is None else f"{_pct(lo)} ~ {_pct(hi)}"
+
+    def num(v, fmt="{:.3f}"):
+        return "—" if v is None else fmt.format(v)
+
+    def spy(v):
+        return "—" if v is None else f"{v:.0f}회"
+
+    outcome_desc = (f"+{cfg['deadzone'][1]:.1%} 이상 오른 비율" if cfg.get("deadzone")
+                    else f"그날 바스켓 내 상위 {cfg['relative_rank']['top_frac']:.0%}(아웃퍼폼)에 실제로 들었던 비율")
+    rows = [
+        ("High-Conf Precision (S_core)", lambda x: f"<span class='text-base font-bold'>{_pct(x['high_conf_precision'])}</span>", True,
+         f"채택 기준 지표(주 지표). P&ge;{cfg['tier2']:.2f} 인 날 중 실제 {outcome_desc}"),
+        ("95% CI (날짜 클러스터 부트스트랩)", ci, False, f"B={cfg['n_boot']}, 같은 날 관측치는 통째로 리샘플 — Gate 2 판정용"),
+        ("|S_core| (Tier 2 신호 수)", lambda x: f"{x['n_s_core']:,}", False, ""),
+        ("S_core 신호 빈도 (연환산, 전 종목 합)", lambda x: spy(x["signals_per_year"]), False, ""),
+        ("Precision (S_base)", lambda x: _pct(x["precision"]), False, f"P&gt;{cfg['tier1']:.2f} (Tier 1) 기준, 참고"),
+        ("|S_base| (Tier 1 신호 수)", lambda x: f"{x['n_s_base']:,}", False, ""),
+        ("F1-Score", lambda x: num(x["f1"]), False, "참고"),
+        ("Brier Score", lambda x: num(x["brier"]), False, "0.25 이하 권장, 참고 (Legacy 는 이진판정이라 해당 없음)"),
+    ]
+    head = "".join(
+        f"<th class='text-right py-2 px-2 {'text-amber-300' if (k.upper() == champ) else ''}'>{label}"
+        f"{' &#9733;' if k.upper() == champ else ''}</th>" for k, label in cols)
+    body = []
+    for label, fn, primary, tip in rows:
+        cls = "bg-cyan-500/5" if primary else ""
+        tip_html = f" <span class='hint text-slate-500' title=\"{tip}\">&#9432;</span>" if tip else ""
+        cells = "".join(f"<td class='text-right py-1.5 px-2'>{fn(m[k])}</td>" for k, _ in cols)
+        body.append(f"<tr class='border-b border-slate-700/50 {cls}'><td class='py-1.5 pr-2 text-slate-400'>{label}{tip_html}</td>{cells}</tr>")
+    return f"""
+      <div class="overflow-x-auto">
+      <table class="w-full text-sm text-slate-300 min-w-[480px]">
+        <thead><tr class="text-xs text-slate-300 border-b border-slate-600"><th class="text-left py-2">지표</th>{head}</tr></thead>
+        <tbody>{''.join(body)}</tbody>
+      </table>
+      </div>
+      <p class="text-[11px] text-slate-500 mt-2">다중비교 방지: 채택 판정은 High-Conf Precision 하나로만 하고, 나머지는 참고 지표입니다.
+        기저율(상승 비율) {_pct(m['baseline']['base_rate'])}.</p>"""
+
+
+def _champ_scenario_table(c: dict) -> str:
+    champ = c["decision"]["champion"]
+    active = champ != "REJECTED"
+    tier_badge = {
+        "S_core": "<span class='rounded px-1.5 py-0.5 bg-emerald-500/20 text-emerald-300 font-semibold'>Tier 2 핵심</span>",
+        "S_base": "<span class='rounded px-1.5 py-0.5 bg-cyan-500/15 text-cyan-300'>Tier 1 방향</span>",
+        "none": "<span class='text-slate-500'>신호 없음</span>",
+        None: "<span class='text-slate-600'>비활성</span>",
+    }
+    is_relative = c["config"].get("label_mode") == "relative"
+    rows = []
+    for s in c["scenario"]:
+        legacy = ("<span class='text-emerald-300'>발동</span>" if s["legacy_signal"] else "<span class='text-slate-500'>—</span>")
+        vm = "—" if s["vm_score"] is None else f"{s['vm_score']:.3f}"
+        pb = "—" if s["p_baseline"] is None else f"{s['p_baseline']:.3f}"
+        pc = "—" if s["p_challenger"] is None else f"{s['p_challenger']:.3f}"
+        line_up = "—" if s["line_up"] is None else f"{s['line_up']:,.0f}"
+        line_down = "—" if s["line_down"] is None else f"{s['line_down']:,.0f}"
+        strong = "font-semibold text-slate-100"
+        pb_cls = strong if champ == "BASELINE" else "text-slate-500"
+        pc_cls = strong if champ == "CHALLENGER" else "text-slate-500"
+        rows.append(f"""<tr class="border-b border-slate-700/50">
+          <td class="py-1.5 pr-2">{s['name']}<span class="text-slate-500 text-xs">({s['code']})</span></td>
+          <td class="py-1.5 px-2 text-right">{s['close']:,.0f}</td>
+          <td class="py-1.5 px-2 text-right text-emerald-300/80">{line_up}</td>
+          <td class="py-1.5 px-2 text-right text-red-300/80">{line_down}</td>
+          <td class="py-1.5 px-2 text-right">{vm}</td>
+          <td class="py-1.5 px-2 text-center">{legacy}</td>
+          <td class="py-1.5 px-2 text-right {pb_cls}">{pb}</td>
+          <td class="py-1.5 px-2 text-right {pc_cls}">{pc}</td>
+          <td class="py-1.5 pl-2 text-xs">{tier_badge.get(s['tier'], '')}</td>
+        </tr>""")
+    note = ("챔피언 모델의 P(상승)로 Tier 를 매깁니다 — 굵은 열이 챔피언입니다(어디까지나 약한 방향성 참고 신호입니다)." if active else
+            "게이트 판정이 <span class='text-amber-300'>최종 기각</span>이라 ML 방향성 참고 신호(Tier)는 비활성화했습니다. "
+            "Baseline·Challenger 확률은 모니터링용으로만 흐리게 표시하고, 운영 판단은 Legacy 룰 열만 봅니다.")
+    line_note = ("상대순위 모드라 고정된 가격 기준선이 없습니다(그날 바스켓 내 상대적 우열로 판정)." if is_relative else
+                f"상단/하단 기준선은 종가 &times; (1 &plusmn; 데드존 {c['config']['deadzone'][1]:.1%}) — "
+                "익일 종가가 이 선 밖으로 나가야 방향이 맞았다/틀렸다를 판정합니다(사이 구간은 노이즈로 보고 판정하지 않음).")
+    return f"""
+      <p class="text-xs text-slate-400 mb-2">{note} {line_note}</p>
+      <div class="overflow-x-auto">
+      <table class="w-full text-sm text-slate-300 min-w-[720px]">
+        <thead><tr class="text-xs text-slate-500 border-b border-slate-600">
+          <th class="text-left py-1.5">종목</th><th class="text-right px-2">종가</th>
+          <th class="text-right px-2">상승 기준선</th><th class="text-right px-2">하락 기준선</th>
+          <th class="text-right px-2">VM Score</th><th class="text-center px-2">Legacy</th>
+          <th class="text-right px-2">P (Baseline)</th><th class="text-right px-2">P (Challenger)</th>
+          <th class="text-left pl-2">시그널 계층</th>
+        </tr></thead>
+        <tbody>{''.join(rows)}</tbody>
+      </table>
+      </div>"""
+
+
+def _champ_summary_html(payload: dict) -> str:
+    """헤더에 고정으로 뜨는 3모델(Legacy&middot;Ridge&middot;LightGBM) 비교 요약 — 탭을 안 옮겨도
+    누가 챔피언인지·왜인지 바로 보인다. 근거 상세(Gate 판정·변수기여도·시나리오)는
+    '챔피언-챌린저' 탭에 그대로 있고, 여기서는 결론만 압축해서 보여준다."""
+    c = payload.get("vm_spc")
+    if not c:
+        return ""
+    d, m = c["decision"], c["metrics"]
+    champ = d["champion"]
+    active_key = {"BASELINE": "baseline", "CHALLENGER": "challenger"}.get(champ)  # REJECTED 는 셋 다 미강조
+
+    def tile(key: str, label: str) -> str:
+        hcp = m[key]["high_conf_precision"]
+        val = _pct(hcp) if hcp is not None else "—"
+        n = m[key]["n_s_core"]
+        active = key == active_key
+        ring = " ring-2 ring-offset-1 ring-offset-slate-800 ring-cyan-400" if active else ""
+        star = " &#9733;" if active else ""
+        return f"""<div class="rounded-lg border border-slate-600/50 bg-slate-700/20 px-3 py-2 text-center{ring}">
+          <div class="text-lg font-bold text-slate-100">{val}{star}</div>
+          <div class="text-[11px] text-slate-400">{label}</div>
+          <div class="text-[10px] text-slate-500">n={n}</div>
+        </div>"""
+
+    tiles = tile("legacy", "Legacy Rule") + tile("baseline", "Baseline (Ridge)") + tile("challenger", "Challenger (LGBM)")
+    thr = f"{c['config']['gate1'] * 100:.0f}%"
+    verdict = (f"채택된 모델: {_CHAMP_LABEL[champ]} <span class='text-slate-400 font-normal text-sm'>"
+              "(약한 방향성 참고 신호, 고신뢰 확정 아님)</span>" if champ != "REJECTED" else
+              f"3모델 모두 Gate 1(≥{thr}) 미달 — 약한 방향성 신호조차 통계적으로 확인 안 됨")
+
+    return f"""
+    <div class="rounded-lg border {_CHAMP_BANNER_CLS[champ]} p-3 mt-3">
+      <div class="flex flex-col md:flex-row md:items-center gap-3 justify-between">
+        <div>
+          <div class="text-xs text-slate-400">종목별 3모델 동시검증 결과</div>
+          <div class="text-base font-bold mt-0.5">{verdict}</div>
+        </div>
+        <div class="grid grid-cols-3 gap-2">{tiles}</div>
+      </div>
+      <div class="text-xs text-slate-300 mt-2">{html.escape(d['reason'])}</div>
+      <button onclick="document.getElementById('tab-btn-champ')?.click()"
+              class="text-[11px] text-cyan-400 hover:text-cyan-300 mt-1 underline underline-offset-2 bg-transparent border-0 p-0 cursor-pointer">
+        자세히 보기 (Gate 판정 · 변수기여도 · 시나리오) &rarr;
+      </button>
+    </div>"""
+
+
+def _champ_tab_content_html(payload: dict) -> str:
+    c = payload.get("vm_spc")
+    if not c:
+        return ""
+    d, cfg, smp, m = c["decision"], c["config"], c["sample"], c["metrics"]
+    champ = d["champion"]
+    banner_cls = _CHAMP_BANNER_CLS[champ]
+
+    g1b, g1c = d["gate1"]["baseline"], d["gate1"]["challenger"]
+    g2 = d.get("gate2")
+    thr = f"{cfg['gate1'] * 100:.0f}%"
+    ci_min = f"{cfg.get('gate1_ci_lower_min', 0.5) * 100:.0f}%"
+    gate2_text = (f"Gate 2 — Challenger&minus;Baseline {g2['margin'] * 100:+.1f}%p (기준 +{cfg['gate2_margin'] * 100:.0f}%p), "
+                  f"CI 하한 {_pct(g2['ci_lower'])} {'&gt;' if g2['ci_ok'] else '&le;'} Baseline {_pct(m['baseline']['high_conf_precision'])}"
+                  if g2 else "Gate 2 — 둘 다 Gate 1 을 통과해야 진행 (이번엔 해당 없음)")
+
+    min_n = cfg.get('gate1_min_n_core', 30)
+    def gate1_text(label: str, g1: dict) -> str:
+        hcp = _pct(g1["high_conf_precision"])
+        ci = _pct(g1["ci_lower"])
+        n_cls = "" if g1.get("n_ok", True) else " text-red-300"
+        return (f"Gate 1 · {label} {hcp}(기준 &ge;{thr}) · CI 하한 {ci}(기준 &gt;{ci_min}) "
+                f"· <span class='{n_cls}'>n={g1['n_s_core']}(기준 &ge;{min_n})</span>")
+
+    flow = f"""
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-2 mt-3">
+        {_gate_chip(g1b["passed"], gate1_text("Baseline", g1b))}
+        {_gate_chip(g1c["passed"], gate1_text("Challenger", g1c))}
+        {_gate_chip(g2['passed'] if g2 else None, gate2_text)}
+      </div>"""
+
+    branch_desc = f"""
+      <details class="mt-3 text-xs text-slate-400">
+        <summary class="text-cyan-400">판정 규칙 (3-분기 Gated Two-Stage, Gate 1 = 점추정 ≥{thr} & CI 하한 &gt;{ci_min})</summary>
+        <p class="mt-1 pl-4 text-slate-500">Gate 1 은 점추정 기준만 안 봅니다 — 표본이 작으면 우연히 높게 나온 값도 점추정
+          기준은 넘을 수 있어서, CI 하한이 동전던지기(50%)보다 확실히 높아야만 통과로 칩니다.</p>
+        <ol class="list-decimal pl-8 mt-1 space-y-0.5">
+          <li>Baseline&middot;Challenger 모두 Gate 1 미달 &rarr; <b>최종 기각</b>, 방향성 참고 신호도 비활성화, Legacy 룰만 운영</li>
+          <li>Baseline 만 Gate 1 통과 &rarr; <b>Baseline 채택</b>(참고용 방향성 신호) — Challenger 만 통과한 예외 시 Challenger 단독 채택</li>
+          <li>둘 다 통과 &rarr; Gate 2: Challenger 가 +3.0%p 이상 높고 CI 하한이 Baseline 점추정보다 높을 때만 Challenger,
+            아니면 더 단순한 Baseline (오컴의 면도날) — 어느 쪽이든 고신뢰 확정이 아니라 참고용 방향성 신호</li>
+        </ol>
+      </details>"""
+
+    limits = "".join(f"<li>{html.escape(x)}</li>" for x in c.get("limitations", []))
+    tickers = ", ".join(t["name"] for t in c["universe"]["tickers"])
+    settings = f"""
+      <details class="text-xs text-slate-400">
+        <summary class="text-cyan-400">검증 설정 &middot; 한계</summary>
+        <div class="mt-2 pl-4 space-y-1">
+          <div>Walk-Forward: 학습 {cfg['train_days']}일 &rarr; Purge {cfg['purge_days']}일 + Embargo {cfg['embargo_days']}일 &rarr;
+            검증 {cfg['test_days']}일, {cfg['test_days']}일씩 슬라이딩 &middot; {len(c['folds'])} folds</div>
+          <div>{_label_mode_desc(cfg)} ({smp['n_excluded']:,}건 제외, 레이블 {smp['n_labeled']:,}건)</div>
+          <div>LightGBM: max_depth={cfg['lgbm']['max_depth']}, num_leaves={cfg['lgbm']['num_leaves']},
+            min_data_in_leaf={cfg['lgbm']['min_data_in_leaf']} &middot; Ridge: L2 로지스틱, 표준화 &middot; 두 모델 모두 종목 ID 더미를 통제변수로 포함</div>
+          <div>풀링 패널 유니버스 ({len(c['universe']['tickers'])}종목): {html.escape(tickers)}</div>
+          <ul class="list-disc pl-5 text-amber-300/80 mt-1">{limits}</ul>
+        </div>
+      </details>"""
+
+    tw = c["contributions"]["train_window"]
+    return f"""
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <section class="card p-4 lg:col-span-2">
+        <h2 class="text-sm font-semibold text-slate-300 mb-2">챔피언 판정 &mdash; Walk-Forward OOS
+          {smp['oos_start']}~{smp['oos_end']} ({smp['n_oos_days']}거래일 &middot; {smp['n_oos']:,}건)</h2>
+        <div class="rounded-lg border {banner_cls} p-3">
+          <div class="text-lg font-bold">{_CHAMP_LABEL[champ]}</div>
+          <div class="text-xs text-slate-300 mt-0.5">{html.escape(d['reason'])}</div>
+        </div>
+        {flow}
+        {branch_desc}
+      </section>
+
+      <section class="card p-4 lg:col-span-2">
+        <h2 class="text-sm font-semibold text-slate-300 mb-2">3-Way 병렬 벤치마크 (OOS 풀링)</h2>
+        {_champ_benchmark_table(c)}
+      </section>
+
+      <section class="card p-4 lg:col-span-2">
+        <h2 class="text-sm font-semibold text-slate-300 mb-1">익일 시나리오 라인 &mdash; {c['as_of_feature_date']} 장마감 기준</h2>
+        {_champ_scenario_table(c)}
+      </section>
+
+      <section class="card p-4">
+        <h2 class="text-sm font-semibold text-slate-300 mb-3">Fold별 High-Conf Precision (S_core)</h2>
+        <div style="height:300px;"><canvas id="champ-chart-folds"></canvas></div>
+        <p class="text-xs text-slate-400 mt-2 italic">&rarr; 빈 칸은 그 fold 에서 S_core 신호가 한 번도 안 나온 경우입니다.
+          fold 별 표본이 작아 흔들림이 크므로, 판정은 전체 OOS 풀링 값으로 합니다.</p>
+      </section>
+
+      <section class="card p-4">
+        <h2 class="text-sm font-semibold text-slate-300 mb-3">변수 기여도 (최근 학습창 {tw[0]}~{tw[1]})</h2>
+        <div class="text-xs text-slate-400 mb-1">Ridge 표준화 계수</div>
+        <div style="height:140px;"><canvas id="champ-chart-ridge"></canvas></div>
+        <div class="text-xs text-slate-400 mt-3 mb-1">LightGBM gain 비중</div>
+        <div style="height:150px;"><canvas id="champ-chart-lgbm"></canvas></div>
+      </section>
+
+      <section class="card p-4 lg:col-span-2">
+        {settings}
+        <p class="text-[11px] text-slate-500 mt-2">자동 주문은 하지 않습니다 — 장 마감 후 한 번 계산해 익일 시나리오를 만들고, 진입 여부는 사람이 판단합니다.</p>
+      </section>
+    </div>"""
+
+
 def _first_valid_date(dates: list, values: list) -> str | None:
     for d, v in zip(dates, values):
         if v is not None:
@@ -703,11 +1069,14 @@ def render(payload: dict) -> str:
         f'<span class="inline-block bg-slate-700/60 rounded px-2 py-0.5 mr-1 mb-1 text-xs">'
         f'{s["name"]}({s["code"]})</span>' for s in b["sensors"])
     header = f"""
-      <div class="text-sm text-slate-400">타겟 ETF</div>
-      <div class="text-lg font-semibold text-cyan-400 mb-2">{b['target']['name']} ({b['target']['code']})</div>
-      <div class="text-sm text-slate-400 mb-1">센서 바스켓 &middot; {b['name']} ({len(b['sensors'])}종목)</div>
+      <div class="text-sm text-slate-300">
+        <span class="text-cyan-400 font-semibold">{b['target']['name']}</span> ({b['target']['code']})
+        <span class="text-slate-500">&middot; 센서 {len(b['sensors'])}종목 &middot; {b['name']}</span>
+      </div>"""
+    sensors_detail = f"""
+      <div class="text-xs text-slate-400 mb-1">센서 바스켓 구성 종목</div>
       <div class="mb-2">{sensors_html}</div>
-      <div class="text-xs text-slate-500">
+      <div class="text-xs text-slate-500 mb-2">
         그래프 구간 {start_date}~{payload['period']['end']}
         <span class="hint" title="수집 기간은 {payload['period']['start']}부터지만, 그래프는 항상 최근 1년만 표시합니다
           (3개 패널 중 워밍업이 가장 긴 T²가 유효해지는 시점보다 늦으면 그쪽이 우선). 컨퓨전 매트릭스는 전체 수집
@@ -715,14 +1084,16 @@ def render(payload: dict) -> str:
         &middot; W={payload['params']['t2_window']}일 &middot;
         CUSUM k={payload['params']['cusum_k']}&sigma;/h={payload['params']['cusum_h']}&sigma; &middot;
         Breadth&ge;{payload['params']['breadth_threshold']}
-      </div>
-    """
+      </div>"""
     html = TEMPLATE
     html = html.replace("__HEADER_HTML__", header)
+    html = html.replace("__CHAMP_SUMMARY_HTML__", _champ_summary_html(payload))
+    html = html.replace("__SENSORS_HTML__", sensors_detail)
     html = html.replace("__HIGHLIGHTS_HTML__", _highlights_html(view))
     html = html.replace("__REPORT_HTML__", _report_html(payload))
     html = html.replace("__TAB_BUTTONS_HTML__", _tab_buttons_html(payload))
     html = html.replace("__PAIR_TAB_CONTENT__", _pair_tab_content_html(payload))
+    html = html.replace("__CHAMP_TAB_CONTENT__", _champ_tab_content_html(payload))
     html = html.replace("__CM_HTML__", _cm_html(payload["confusion_matrix"]))
     html = html.replace("__INTERP_TARGET__", _interp_target(view))
     html = html.replace("__INTERP_BREADTH__", _interp_breadth(view))
@@ -749,6 +1120,10 @@ def render_basket(basket: dict) -> int:
             "stage0": json.loads(stage0_path.read_text(encoding="utf-8")),
             "result": json.loads(result_path.read_text(encoding="utf-8")) if result_path.exists() else None,
         }
+
+    champ_path = results_dir() / basket["name"] / "vm_spc" / "vm_spc_dashboard_data.json"
+    if champ_path.exists():
+        payload["vm_spc"] = json.loads(champ_path.read_text(encoding="utf-8"))
 
     out = results_dir() / basket["name"] / "dashboard_v2.html"
     out.write_text(render(payload), encoding="utf-8")
