@@ -76,30 +76,32 @@ TEMPLATE = r"""<!DOCTYPE html>
 
   <div id="tab-content-vm" class="grid grid-cols-1 lg:grid-cols-2 gap-4">
     <section class="card p-4">
-      <h2 class="text-sm font-semibold text-slate-300 mb-1">Panel 1 · VM 컨퓨전 매트릭스
-        <span class="text-cyan-400 font-normal">(예측)</span></h2>
+      <h2 class="text-sm font-semibold text-slate-300 mb-1">내일(T+1) 예측</h2>
       <div id="today-prediction" class="rounded-lg border border-cyan-500/40 bg-cyan-500/10 p-3 mb-3"></div>
-      __CM_HTML__
-      <p class="text-xs text-slate-400 mt-2 italic">&rarr; __INTERP_CM__</p>
+      <p class="text-xs text-slate-400 italic">&rarr; __INTERP_CM__</p>
+      <details class="mt-2 text-xs text-slate-400">
+        <summary class="text-cyan-400 cursor-pointer">과거 예측이 얼마나 맞았는지 숫자로 보기</summary>
+        <div class="mt-2">__CM_HTML__</div>
+      </details>
     </section>
 
     <section class="card p-4">
-      <h2 class="text-sm font-semibold text-slate-300 mb-3">Panel 2 · 타겟 ETF 캔들스틱 + 칼만 평활선 + CUSUM 마커
-        <span class="text-slate-500 font-normal">(탐지)</span></h2>
+      <h2 class="text-sm font-semibold text-slate-300 mb-3">가격 흐름 이상 탐지
+        <span class="text-slate-500 font-normal hint" title="칼만필터 평활선 + CUSUM 관리도">(탐지)</span></h2>
       <div id="chart-target" style="height:380px;"></div>
       <p class="text-xs text-slate-400 mt-2 italic">&rarr; __INTERP_TARGET__</p>
     </section>
 
     <section class="card p-4">
-      <h2 class="text-sm font-semibold text-slate-300 mb-3">Panel 3 · Top N Breadth 듀얼 CUSUM 관리도
-        <span class="text-slate-500 font-normal">(탐지)</span></h2>
+      <h2 class="text-sm font-semibold text-slate-300 mb-3">센서 종목 전체 이상 탐지
+        <span class="text-slate-500 font-normal hint" title="Top N Breadth 듀얼 CUSUM 관리도">(탐지)</span></h2>
       <div style="height:380px;"><canvas id="chart-breadth-cusum"></canvas></div>
       <p class="text-xs text-slate-400 mt-2 italic">&rarr; __INTERP_BREADTH__</p>
     </section>
 
     <section class="card p-4">
-      <h2 class="text-sm font-semibold text-slate-300 mb-3">Panel 4 · Hotelling's T&sup2; 이상치 스코어
-        <span class="text-slate-500 font-normal">(탐지)</span></h2>
+      <h2 class="text-sm font-semibold text-slate-300 mb-3">신호 간 상관관계 이상 탐지
+        <span class="text-slate-500 font-normal hint" title="Hotelling's T&sup2; 이상치 스코어">(탐지)</span></h2>
       <div style="height:380px;"><canvas id="chart-t2"></canvas></div>
       <p class="text-xs text-slate-400 mt-2 italic">&rarr; __INTERP_T2__</p>
     </section>
@@ -589,11 +591,14 @@ def _pair_tab_content_html(payload: dict) -> str:
             reason = f"ex-self 동시상관 기준(r&ge;{corr_min})을 통과한 종목이 없습니다."
         return f"""
         <div class="card p-4">
-          <h2 class="text-sm font-semibold text-amber-400 mb-2">Stage 0 &mdash; 섹터 대표종목 실증 선정: 대표종목 없음</h2>
-          <p class="text-xs text-slate-400">이 섹터는 {reason}
-            <span class="text-slate-200 font-medium">단일 종목으로 이 섹터 ETF를 대변할 수 없다는 것
-            자체가 유효한 결론</span>이며, 억지로 다음 단계(공적분&middot;SPC)로 넘기지 않습니다.</p>
-          {cands_html}
+          <h2 class="text-sm font-semibold text-amber-400 mb-2">대표종목 없음</h2>
+          <p class="text-sm text-slate-300"><span class="text-slate-100 font-medium">이 섹터는 종목 하나로 대변할 수 없습니다</span>
+            — 억지로 끼워맞추지 않고 그대로 알립니다.</p>
+          <details class="mt-2 text-xs text-slate-400">
+            <summary class="text-cyan-400 cursor-pointer">전문용어로 자세히 보기</summary>
+            <p class="mt-1">{reason}</p>
+            {cands_html}
+          </details>
         </div>"""
 
     rep, coint = result["representative"], result["cointegration"]
@@ -621,48 +626,57 @@ def _pair_tab_content_html(payload: dict) -> str:
                    "alert_down": "하방 관리이탈 중"}.get(state, "")
 
     def stat(label, value, short="", desc=""):
-        s = f'<div class="text-[11px] text-cyan-300/70 mt-0.5">{short}</div>' if short else ""
-        d = f'''<details class="mt-1"><summary class="text-[10px] text-slate-500 cursor-pointer">설명</summary>
+        # 쉬운 말(short)을 큰 글씨로 먼저 보여주고, 기술 수치(value)는 작게 아래에 둔다 —
+        # 전문용어·원자료는 "설명" 토글 안에서만 필요한 사람이 본다.
+        primary = short or value
+        sub = f'<div class="text-[11px] text-slate-500 mt-0.5">{value}</div>' if short else ""
+        d = f'''<details class="mt-1"><summary class="text-[10px] text-slate-500 cursor-pointer">전문용어로 보기</summary>
           <p class="text-[10px] text-slate-500 mt-1 leading-tight">{desc}</p></details>''' if desc else ""
         return f"""<div class="rounded-lg border border-slate-600/40 bg-slate-700/20 p-3">
-          <div class="text-lg font-bold text-cyan-400">{value}</div>
-          <div class="text-xs text-slate-300">{label}</div>
-          {s}
+          <div class="text-base font-bold text-cyan-300">{primary}</div>
+          <div class="text-xs text-slate-400">{label}</div>
+          {sub}
           {d}
         </div>"""
 
     kpis = f"""
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-      {stat("대표종목", f"{rep['name']} &middot; 비중 {rep['weight'] * 100:.1f}%", "공적분 가장 강한 종목으로 선정",
+      {stat("대표종목", f"{rep['name']} &middot; 비중 {rep['weight'] * 100:.1f}%", "",
             "①동시상관&ge;0.7 통과 종목 중 ②실제 공적분(ADF)이 가장 강한(p값이 가장 작은) 종목을 최종 대표로 선정합니다. "
             "'비중'은 이 종목이 타겟 ETF 안에서 차지하는 실제 편입비율입니다. 아래 '후보 비교' 참고.")}
-      {stat("Ex-self 동시상관", f"{rep['exself_corr']:.3f}", exself_short,
+      {stat("동행 정도", f"Ex-self 동시상관 {rep['exself_corr']:.3f}", exself_short,
             "A를 뺀 나머지 섹터(ETF-ex-A)와 A의 동행 정도")}
-      {stat("리드-래그(k1/k2/k3)", ll_str, leadlag_short, "A가 나머지 섹터를 며칠 선행하는지(참고용, 대표성 판정엔 미반영)")}
-      {stat("공적분(ADF)", f"p={coint['adf_p']:.4f} ({'예' if coint['is_cointegrated'] else '아니오'})", coint_short,
+      {stat("선행성", f"리드-래그(k1/k2/k3) {ll_str}", leadlag_short, "A가 나머지 섹터를 며칠 선행하는지(참고용, 대표성 판정엔 미반영)")}
+      {stat("장기 관계", f"공적분(ADF) p={coint['adf_p']:.4f} ({'예' if coint['is_cointegrated'] else '아니오'})", coint_short,
             "A와 ETF-ex-A 스프레드가 평균회귀하는 정상시계열인지(p&lt;0.05면 공적분)")}
-      {stat("Half-life", hl_str, hl_short, "스프레드가 이탈폭의 절반만큼 되돌아오는 데 걸리는 거래일 수")}
-      {stat("현재 상태", f'<span class="{state_color}">{state_label}</span>', state_short,
-            f"연속 {result['params']['hysteresis_days']}거래일 확정 기준(플리커링 방지)")}
+      {stat("되돌림 속도", f"Half-life {hl_str}", hl_short, "스프레드가 이탈폭의 절반만큼 되돌아오는 데 걸리는 거래일 수")}
     </div>"""
 
     cands_html = _candidates_table_html(stage0["candidates"], rep["code"]) if stage0 else ""
     return f"""
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <section class="card p-4 lg:col-span-2">
-        <h2 class="text-sm font-semibold text-slate-300 mb-1">Stage 0 &mdash; 대표종목: {rep['name']}({rep['code']})</h2>
+        <h2 class="text-sm font-semibold text-slate-300 mb-1">지금 상태</h2>
+        <div class="rounded-lg border {'border-emerald-500/50 bg-emerald-500/10' if state == 'normal' else 'border-red-500/50 bg-red-500/10' if state == 'alert_up' else 'border-blue-500/50 bg-blue-500/10'} p-3 mb-3">
+          <div class="text-lg font-bold {state_color}">{state_label}{f' — {state_short}' if state_short else ''}</div>
+          <div class="text-xs text-slate-400 mt-0.5">대표종목 {rep['name']}({rep['code']})이 나머지 섹터와 맺는 관계를 매일 점검합니다
+            &middot; 연속 {result['params']['hysteresis_days']}거래일 확정 기준</div>
+        </div>
+        <h3 class="text-xs font-semibold text-slate-400 mb-2">참고 &mdash; 왜 이 종목을 대표로 골랐나</h3>
         {kpis}
         <details class="mt-2 text-xs text-slate-400">
-          <summary class="text-cyan-400 cursor-pointer">후보 비교 보기 (왜 이 종목이 선정됐는지)</summary>
+          <summary class="text-cyan-400 cursor-pointer">후보 비교를 전문용어로 자세히 보기</summary>
           {cands_html}
         </details>
       </section>
       <section class="card p-4">
-        <h2 class="text-sm font-semibold text-slate-300 mb-3">가격 궤적 &mdash; {rep['name']} vs ETF-ex-A (리베이스 100)</h2>
+        <h2 class="text-sm font-semibold text-slate-300 mb-3">가격 궤적 비교
+          <span class="text-slate-500 font-normal">({rep['name']} vs 나머지 섹터, 시작일=100)</span></h2>
         <div id="pair-chart-price" style="height:380px;"></div>
       </section>
       <section class="card p-4">
-        <h2 class="text-sm font-semibold text-slate-300 mb-3">공적분 스프레드 Z-Score SPC 관리도</h2>
+        <h2 class="text-sm font-semibold text-slate-300 mb-3">이탈 추이
+          <span class="text-slate-500 font-normal hint" title="공적분 스프레드 Z-Score SPC 관리도">(관리도)</span></h2>
         <div style="height:380px;"><canvas id="pair-chart-z"></canvas></div>
       </section>
     </div>"""
@@ -670,6 +684,7 @@ def _pair_tab_content_html(payload: dict) -> str:
 
 _CHAMP_LABEL = {"BASELINE": "Baseline (Ridge Logistic)", "CHALLENGER": "Challenger (LightGBM)",
                 "REJECTED": "최종 기각 — Legacy 룰만 운영"}
+_PLAIN_CHAMP_LABEL = {"BASELINE": "지금 기준: 단순 모델", "CHALLENGER": "지금 기준: 복잡한 모델"}
 _CHAMP_BANNER_CLS = {"REJECTED": "border-amber-500/50 bg-amber-500/10 text-amber-300",
                      "BASELINE": "border-cyan-500/50 bg-cyan-500/10 text-cyan-300",
                      "CHALLENGER": "border-purple-500/50 bg-purple-500/10 text-purple-300"}
@@ -697,6 +712,91 @@ def _gate_chip(ok: bool | None, text: str) -> str:
     else:
         cls, mark = "border-red-500/50 bg-red-500/10 text-red-300", "&#10007;"
     return f'<div class="rounded-lg border {cls} px-3 py-2 text-xs"><span class="font-bold mr-1">{mark}</span>{text}</div>'
+
+
+def _champ_plain_compare(c: dict) -> str:
+    """전문용어 없이 한 문장으로 — "누가 몇 번 중 몇 번 맞았는지"만 말한다. 표 전체(지표 이름들)는
+    이 문장 아래 접힌 상세에 그대로 남긴다."""
+    m = c["metrics"]
+    parts = []
+    for key, label in (("baseline", "단순 모델"), ("challenger", "복잡한 모델")):
+        hcp, n = m[key]["high_conf_precision"], m[key]["n_s_core"]
+        parts.append(f"{label}은 강한 신호를 낸 적이 없습니다" if (hcp is None or not n)
+                     else f"{label}은 강한 신호 {n}번 중 {hcp:.0%} 맞았습니다")
+    return " · ".join(parts) + "."
+
+
+
+def _champ_top_signal(c: dict) -> tuple[dict, float, bool] | None:
+    """오늘 산출된 예측 중 가장 확신이 강한 것(|P-0.5| 최대) 하나 — 헤더 미리보기용. 챔피언이
+    있으면(p_champion) 검증된 값을, 없으면(REJECTED) Baseline 원값을 미검증 참고치로 대신
+    쓴다(빈칸보다 낫다는 2026-09-27 사용자 피드백) — 반환: (종목, 확률, validated)."""
+    best, best_gap = None, -1.0
+    for s in c["scenario"]:
+        p = s.get("p_champion")
+        if p is None:
+            continue
+        gap = abs(p - 0.5)
+        if gap > best_gap:
+            best, best_gap = s, gap
+    if best is not None:
+        return best, best["p_champion"], True
+    for s in c["scenario"]:
+        p = s.get("p_baseline")
+        if p is None:
+            continue
+        gap = abs(p - 0.5)
+        if gap > best_gap:
+            best, best_gap = s, gap
+    return (best, best["p_baseline"], False) if best is not None else None
+
+
+def _champ_direction_table(c: dict) -> str:
+    """메인 콘텐츠 — 종목별 '내일 방향 + 확률'. 이 파이프라인이 애초에 예측하는 건 이것 하나뿐이고
+    (변동폭은 모델링 대상이 아님), 어느 모델이 더 정확한지는 참고 정보로 아래에 따로 둔다.
+
+    챔피언이 없어도(REJECTED) 빈칸으로 감추지 않는다 — Baseline·Challenger 는 게이트를 못
+    넘었을 뿐 확률 자체는 계산돼 있으므로, Baseline 원값을 미검증 참고치로 흐리게 보여준다
+    (빈칸보다 낫다는 2026-09-27 사용자 피드백). 검증된 값과는 색·문구로 명확히 구분한다."""
+    validated = c["decision"]["champion"] != "REJECTED"
+    prob_key = "p_champion" if validated else "p_baseline"
+    is_relative = c["config"].get("label_mode") == "relative"
+    caption = ("그날 바스켓 평균 대비 상대적으로 강할지&middot;약할지를 확률로 나타냅니다 "
+              "(개별 종목의 절대적인 등락을 보장하는 건 아닙니다)." if is_relative else
+              "익일 종가가 전일 대비 오를지&middot;내릴지를 확률로 나타냅니다.")
+    if not validated:
+        caption += (" <b class='text-amber-300'>지금은 게이트를 통과한 모델이 없어 확정된 예측이 아닙니다</b>"
+                    " — 아래는 Baseline(단순 모델)의 미검증 참고치입니다.")
+    scored = sorted(((abs(s[prob_key] - 0.5), s) for s in c["scenario"] if s.get(prob_key) is not None),
+                    key=lambda t: -t[0])
+    if not scored:
+        return """<p class="text-sm text-slate-300">오늘 산출된 예측이 없습니다.</p>"""
+    rows = []
+    for _, s in scored:
+        p = s[prob_key]
+        up = p >= 0.5
+        conf = p if up else (1 - p)
+        if validated:
+            arrow, label, color = ("&#9650;", "상승 우세", "text-emerald-400") if up else ("&#9660;", "하락 우세", "text-red-400")
+        else:
+            arrow, label, color = ("&#9650;", "상승", "text-slate-400") if up else ("&#9660;", "하락", "text-slate-400")
+        rows.append(f"""<tr class="border-b border-slate-700/50">
+          <td class="py-1.5 pr-2">{s['name']}<span class="text-slate-500 text-xs">({s['code']})</span></td>
+          <td class="py-1.5 px-2 text-right">{s['close']:,.0f}</td>
+          <td class="py-1.5 px-2 text-center {color} font-semibold">{arrow} {label}</td>
+          <td class="py-1.5 px-2 text-right {color} font-bold">{conf:.0%}</td>
+        </tr>""")
+    return f"""
+      <p class="text-xs text-slate-400 mb-2">{caption}</p>
+      <div class="overflow-x-auto">
+      <table class="w-full text-sm text-slate-300">
+        <thead><tr class="text-xs text-slate-500 border-b border-slate-600">
+          <th class="text-left py-1.5">종목</th><th class="text-right px-2">종가</th>
+          <th class="text-center px-2">방향</th><th class="text-right px-2">확률</th>
+        </tr></thead>
+        <tbody>{''.join(rows)}</tbody>
+      </table>
+      </div>"""
 
 
 def _champ_benchmark_table(c: dict) -> str:
@@ -804,9 +904,9 @@ def _champ_scenario_table(c: dict) -> str:
 
 
 def _champ_summary_html(payload: dict) -> str:
-    """헤더에 고정으로 뜨는 3모델(Legacy&middot;Ridge&middot;LightGBM) 비교 요약 — 탭을 안 옮겨도
-    누가 챔피언인지·왜인지 바로 보인다. 근거 상세(Gate 판정·변수기여도·시나리오)는
-    '챔피언-챌린저' 탭에 그대로 있고, 여기서는 결론만 압축해서 보여준다."""
+    """헤더에 고정으로 뜨는 요약 — 탭을 안 옮겨도 오늘 가장 강한 방향 예측이 뭔지 바로 보인다.
+    "어느 모델이 더 정확한가"는 이 파이프라인이 예측하는 대상이 아니라 참고 정보라서, 작게
+    아래에 둔다. 근거 상세(Gate 판정·변수기여도·시나리오)는 '챔피언-챌린저' 탭에 그대로 있다."""
     c = payload.get("vm_spc")
     if not c:
         return ""
@@ -814,38 +914,57 @@ def _champ_summary_html(payload: dict) -> str:
     champ = d["champion"]
     active_key = {"BASELINE": "baseline", "CHALLENGER": "challenger"}.get(champ)  # REJECTED 는 셋 다 미강조
 
-    def tile(key: str, label: str) -> str:
+    res = _champ_top_signal(c)
+    if res is not None:
+        top, p, validated = res
+        up = p >= 0.5
+        conf = p if up else (1 - p)
+        if validated:
+            arrow, label, color = ("&#9650;", "상승 우세", "text-emerald-400") if up else ("&#9660;", "하락 우세", "text-red-400")
+            headline_label = "오늘의 가장 강한 신호"
+            note = ""
+        else:
+            arrow, label, color = ("&#9650;", "상승", "text-slate-400") if up else ("&#9660;", "하락", "text-slate-400")
+            headline_label = "오늘의 신호"
+            note = " <span class='text-amber-300 font-normal text-sm'>(게이트 미달·참고용)</span>"
+        headline = (f"<span class='{color}'>{arrow} {top['name']} {label}</span> "
+                    f"<span class='text-slate-400 font-normal text-base'>&middot; 확률 {conf:.0%}</span>{note}")
+    else:
+        headline_label, headline = "오늘의 신호", "아직 믿을 만한 방향 예측 없음"
+
+    def tile(key: str, label: str, sub: str) -> str:
         hcp = m[key]["high_conf_precision"]
         val = _pct(hcp) if hcp is not None else "—"
         n = m[key]["n_s_core"]
         active = key == active_key
-        ring = " ring-2 ring-offset-1 ring-offset-slate-800 ring-cyan-400" if active else ""
+        ring = " ring-1 ring-offset-1 ring-offset-slate-800 ring-cyan-400" if active else ""
         star = " &#9733;" if active else ""
-        return f"""<div class="rounded-lg border border-slate-600/50 bg-slate-700/20 px-3 py-2 text-center{ring}">
-          <div class="text-lg font-bold text-slate-100">{val}{star}</div>
-          <div class="text-[11px] text-slate-400">{label}</div>
-          <div class="text-[10px] text-slate-500">n={n}</div>
+        return f"""<div class="rounded border border-slate-600/50 bg-slate-700/20 px-2 py-1 text-center{ring}">
+          <div class="text-sm font-bold text-slate-100">{val}{star}</div>
+          <div class="text-[10px] text-slate-400">{label}<span class="text-slate-500"> &middot; {sub}</span></div>
         </div>"""
 
-    tiles = tile("legacy", "Legacy Rule") + tile("baseline", "Baseline (Ridge)") + tile("challenger", "Challenger (LGBM)")
-    thr = f"{c['config']['gate1'] * 100:.0f}%"
-    verdict = (f"채택된 모델: {_CHAMP_LABEL[champ]} <span class='text-slate-400 font-normal text-sm'>"
-              "(약한 방향성 참고 신호, 고신뢰 확정 아님)</span>" if champ != "REJECTED" else
-              f"3모델 모두 Gate 1(≥{thr}) 미달 — 약한 방향성 신호조차 통계적으로 확인 안 됨")
+    tiles = (tile("legacy", "기존 규칙", "Legacy") + tile("baseline", "단순 모델", "Ridge")
+            + tile("challenger", "복잡한 모델", "LightGBM"))
 
     return f"""
     <div class="rounded-lg border {_CHAMP_BANNER_CLS[champ]} p-3 mt-3">
-      <div class="flex flex-col md:flex-row md:items-center gap-3 justify-between">
-        <div>
-          <div class="text-xs text-slate-400">종목별 3모델 동시검증 결과</div>
-          <div class="text-base font-bold mt-0.5">{verdict}</div>
+      <div class="text-xs text-slate-400">{headline_label}</div>
+      <div class="text-xl font-bold mt-0.5">{headline}</div>
+
+      <div class="mt-3 pt-3 border-t border-slate-700/60 flex flex-col md:flex-row md:items-center gap-2 justify-between">
+        <div class="text-xs text-slate-400">
+          참고 &middot; 예측 신뢰도: <span class="text-slate-200">{html.escape(d.get('plain_reason', ''))}</span>
         </div>
-        <div class="grid grid-cols-3 gap-2">{tiles}</div>
+        <div class="grid grid-cols-3 gap-1.5">{tiles}</div>
       </div>
-      <div class="text-xs text-slate-300 mt-2">{html.escape(d['reason'])}</div>
+      <details class="mt-1 text-[11px] text-slate-500">
+        <summary class="cursor-pointer hover:text-slate-400">전문용어로 자세히 보기</summary>
+        <p class="mt-1 pl-2">{html.escape(d['reason'])}</p>
+      </details>
       <button onclick="document.getElementById('tab-btn-champ')?.click()"
               class="text-[11px] text-cyan-400 hover:text-cyan-300 mt-1 underline underline-offset-2 bg-transparent border-0 p-0 cursor-pointer">
-        자세히 보기 (Gate 판정 · 변수기여도 · 시나리오) &rarr;
+        전체 종목 방향 예측 보기 &rarr;
       </button>
     </div>"""
 
@@ -874,23 +993,22 @@ def _champ_tab_content_html(payload: dict) -> str:
         return (f"Gate 1 · {label} {hcp}(기준 &ge;{thr}) · CI 하한 {ci}(기준 &gt;{ci_min}) "
                 f"· <span class='{n_cls}'>n={g1['n_s_core']}(기준 &ge;{min_n})</span>")
 
-    flow = f"""
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-2 mt-3">
-        {_gate_chip(g1b["passed"], gate1_text("Baseline", g1b))}
-        {_gate_chip(g1c["passed"], gate1_text("Challenger", g1c))}
-        {_gate_chip(g2['passed'] if g2 else None, gate2_text)}
-      </div>"""
-
     branch_desc = f"""
       <details class="mt-3 text-xs text-slate-400">
-        <summary class="text-cyan-400">판정 규칙 (3-분기 Gated Two-Stage, Gate 1 = 점추정 ≥{thr} & CI 하한 &gt;{ci_min})</summary>
-        <p class="mt-1 pl-4 text-slate-500">Gate 1 은 점추정 기준만 안 봅니다 — 표본이 작으면 우연히 높게 나온 값도 점추정
-          기준은 넘을 수 있어서, CI 하한이 동전던지기(50%)보다 확실히 높아야만 통과로 칩니다.</p>
-        <ol class="list-decimal pl-8 mt-1 space-y-0.5">
-          <li>Baseline&middot;Challenger 모두 Gate 1 미달 &rarr; <b>최종 기각</b>, 방향성 참고 신호도 비활성화, Legacy 룰만 운영</li>
-          <li>Baseline 만 Gate 1 통과 &rarr; <b>Baseline 채택</b>(참고용 방향성 신호) — Challenger 만 통과한 예외 시 Challenger 단독 채택</li>
-          <li>둘 다 통과 &rarr; Gate 2: Challenger 가 +3.0%p 이상 높고 CI 하한이 Baseline 점추정보다 높을 때만 Challenger,
-            아니면 더 단순한 Baseline (오컴의 면도날) — 어느 쪽이든 고신뢰 확정이 아니라 참고용 방향성 신호</li>
+        <summary class="text-cyan-400 cursor-pointer">판정 근거를 전문용어로 자세히 보기</summary>
+        <div class="mt-2 grid grid-cols-1 md:grid-cols-3 gap-2">
+          {_gate_chip(g1b["passed"], gate1_text("Baseline", g1b))}
+          {_gate_chip(g1c["passed"], gate1_text("Challenger", g1c))}
+          {_gate_chip(g2['passed'] if g2 else None, gate2_text)}
+        </div>
+        <p class="mt-3 pl-1 text-slate-500">기준(Gate 1) 은 점추정만 보지 않습니다 — 표본이 작으면 우연히 높게 나온 값도
+          점추정 기준은 넘을 수 있어서, 통계적 신뢰구간(CI) 하한이 동전던지기(50%)보다 확실히 높고 표본도
+          충분해야만 통과로 칩니다.</p>
+        <ol class="list-decimal pl-8 mt-1 space-y-0.5 text-slate-500">
+          <li>단순·복잡한 모델 둘 다 기준 미달 &rarr; <b>최종 기각</b>, 참고 신호도 비활성화, 기존 규칙만 운영</li>
+          <li>단순 모델만 기준 통과 &rarr; <b>단순 모델 채택</b>(참고용 신호) — 복잡한 모델만 통과한 예외 시 복잡한 모델 단독 채택</li>
+          <li>둘 다 통과 &rarr; 복잡한 모델이 +3.0%p 이상 뚜렷하게 나을 때만 복잡한 모델, 아니면 더 단순한 쪽(오컴의 면도날)
+            — 어느 쪽이든 확실한 신호가 아니라 참고용</li>
         </ol>
       </details>"""
 
@@ -898,7 +1016,7 @@ def _champ_tab_content_html(payload: dict) -> str:
     tickers = ", ".join(t["name"] for t in c["universe"]["tickers"])
     settings = f"""
       <details class="text-xs text-slate-400">
-        <summary class="text-cyan-400">검증 설정 &middot; 한계</summary>
+        <summary class="text-cyan-400 cursor-pointer">검증 방식을 전문용어로 자세히 보기</summary>
         <div class="mt-2 pl-4 space-y-1">
           <div>Walk-Forward: 학습 {cfg['train_days']}일 &rarr; Purge {cfg['purge_days']}일 + Embargo {cfg['embargo_days']}일 &rarr;
             검증 {cfg['test_days']}일, {cfg['test_days']}일씩 슬라이딩 &middot; {len(c['folds'])} folds</div>
@@ -914,38 +1032,42 @@ def _champ_tab_content_html(payload: dict) -> str:
     return f"""
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <section class="card p-4 lg:col-span-2">
-        <h2 class="text-sm font-semibold text-slate-300 mb-2">챔피언 판정 &mdash; Walk-Forward OOS
-          {smp['oos_start']}~{smp['oos_end']} ({smp['n_oos_days']}거래일 &middot; {smp['n_oos']:,}건)</h2>
+        <h2 class="text-sm font-semibold text-slate-300 mb-1">내일 방향 예측 &mdash; {c['as_of_feature_date']} 장마감 기준</h2>
+        {_champ_direction_table(c)}
+        <details class="mt-3 text-xs text-slate-400">
+          <summary class="text-cyan-400 cursor-pointer">확률·기준값을 전문용어로 자세히 보기</summary>
+          <div class="mt-2">{_champ_scenario_table(c)}</div>
+        </details>
+      </section>
+
+      <section class="card p-4 lg:col-span-2">
+        <h2 class="text-sm font-semibold text-slate-300 mb-2">참고 &mdash; 이 예측, 얼마나 믿을 만한가
+          <span class="text-slate-500 font-normal">({smp['oos_start']}~{smp['oos_end']} 검증 기준)</span></h2>
         <div class="rounded-lg border {banner_cls} p-3">
-          <div class="text-lg font-bold">{_CHAMP_LABEL[champ]}</div>
-          <div class="text-xs text-slate-300 mt-0.5">{html.escape(d['reason'])}</div>
+          <div class="text-lg font-bold">{_PLAIN_CHAMP_LABEL.get(champ, '아직 믿을 만한 신호 없음')}</div>
+          <div class="text-xs text-slate-300 mt-0.5">{html.escape(d.get('plain_reason', ''))}</div>
         </div>
-        {flow}
+        <p class="text-sm text-slate-300 mt-3">{_champ_plain_compare(c)}</p>
+        <details class="mt-2 text-xs text-slate-400">
+          <summary class="text-cyan-400 cursor-pointer">숫자로 자세히 보기</summary>
+          <div class="mt-2">{_champ_benchmark_table(c)}</div>
+        </details>
         {branch_desc}
       </section>
 
-      <section class="card p-4 lg:col-span-2">
-        <h2 class="text-sm font-semibold text-slate-300 mb-2">3-Way 병렬 벤치마크 (OOS 풀링)</h2>
-        {_champ_benchmark_table(c)}
-      </section>
-
-      <section class="card p-4 lg:col-span-2">
-        <h2 class="text-sm font-semibold text-slate-300 mb-1">익일 시나리오 라인 &mdash; {c['as_of_feature_date']} 장마감 기준</h2>
-        {_champ_scenario_table(c)}
-      </section>
-
       <section class="card p-4">
-        <h2 class="text-sm font-semibold text-slate-300 mb-3">Fold별 High-Conf Precision (S_core)</h2>
+        <h2 class="text-sm font-semibold text-slate-300 mb-3">검증 구간별 적중률</h2>
         <div style="height:300px;"><canvas id="champ-chart-folds"></canvas></div>
-        <p class="text-xs text-slate-400 mt-2 italic">&rarr; 빈 칸은 그 fold 에서 S_core 신호가 한 번도 안 나온 경우입니다.
-          fold 별 표본이 작아 흔들림이 크므로, 판정은 전체 OOS 풀링 값으로 합니다.</p>
+        <p class="text-xs text-slate-400 mt-2 italic">&rarr; 빈 칸은 그 구간에서 강한 신호가 한 번도 안 나온 경우입니다.
+          구간마다 표본이 작아 흔들림이 크므로, 최종 판정은 전체 기간을 합친 값으로 합니다.</p>
       </section>
 
       <section class="card p-4">
-        <h2 class="text-sm font-semibold text-slate-300 mb-3">변수 기여도 (최근 학습창 {tw[0]}~{tw[1]})</h2>
-        <div class="text-xs text-slate-400 mb-1">Ridge 표준화 계수</div>
+        <h2 class="text-sm font-semibold text-slate-300 mb-3">무엇을 근거로 판단했나
+          <span class="text-slate-500 font-normal">(최근 학습창 {tw[0]}~{tw[1]})</span></h2>
+        <div class="text-xs text-slate-400 mb-1">단순 모델이 중요하게 본 요인</div>
         <div style="height:140px;"><canvas id="champ-chart-ridge"></canvas></div>
-        <div class="text-xs text-slate-400 mt-3 mb-1">LightGBM gain 비중</div>
+        <div class="text-xs text-slate-400 mt-3 mb-1">복잡한 모델이 중요하게 본 요인</div>
         <div style="height:150px;"><canvas id="champ-chart-lgbm"></canvas></div>
       </section>
 

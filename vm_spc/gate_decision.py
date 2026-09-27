@@ -79,8 +79,9 @@ def _gate1_why(label: str, d: dict) -> str | None:
 
 
 def decide_champion(baseline_metrics: dict, challenger_metrics: dict) -> dict:
-    """판정 결과 + 어느 분기를 탔는지(대시보드 설명용). 통과해도 '고신뢰 확정'이 아니라
-    '통계적으로 확인된 약한 방향성 참고 신호'라는 톤을 reason 문구에 명시한다."""
+    """판정 결과 + 어느 분기를 탔는지(대시보드 설명용). `reason`(전문용어 포함, 상세 화면용)과
+    `plain_reason`(전문용어 없이 한 문장, 첫 화면용)을 둘 다 남긴다 — 통과해도 '고신뢰 확정'이
+    아니라 '통계적으로 확인된 약한 방향성 참고 신호'라는 톤은 둘 다 유지한다."""
     base_d, chal_d = gate1_detail(baseline_metrics), gate1_detail(challenger_metrics)
     base_pass, chal_pass = base_d["passed"], chal_d["passed"]
     out = {"gate1": {"baseline": base_d, "challenger": chal_d}, "gate2": None}
@@ -89,16 +90,19 @@ def decide_champion(baseline_metrics: dict, challenger_metrics: dict) -> dict:
 
     if not base_pass and not chal_pass:
         return {**out, "champion": "REJECTED", "branch": 1,
+                "plain_reason": "두 모델 다 아직 믿을 만한 신호를 찾지 못했습니다 — 지금은 기존 규칙만 참고하세요.",
                 "reason": (f"Baseline·Challenger 모두 Gate 1(High-Conf Precision ≥ {thr}, CI 하한 >{CI_LOWER_MIN:.0%}, n≥{MIN_N_CORE}) "
                           f"미달 — 약한 방향성 신호조차 통계적으로 확인 안 됨, Legacy 룰만 운영. " + " / ".join(notes))}
     if base_pass and not chal_pass:
         return {**out, "champion": "BASELINE", "branch": 2,
+                "plain_reason": "단순한 모델에서만 일관된 신호가 확인돼 이걸 기준으로 삼습니다 — 확실한 건 아니고 약한 참고 신호입니다.",
                 "reason": (f"Baseline 만 Gate 1(≥{thr}, CI 하한 >{CI_LOWER_MIN:.0%}, n≥{MIN_N_CORE}) 통과 — "
                           f"약한 방향성 참고 신호로 Baseline 채택(고신뢰 확정 아님). {_gate1_why('Challenger', chal_d) or ''}")}
     if not base_pass and chal_pass:
         # Baseline이 기준 미달인데 Challenger만 통과한 예외 케이스
         # → Gate 2 취지상 비교 대상이 없으므로 Challenger 단독 채택
         return {**out, "champion": "CHALLENGER", "branch": "2b",
+                "plain_reason": "복잡한 모델에서만(비교 대상 없이) 신호가 확인돼 이걸 기준으로 삼습니다 — 확실한 건 아니고 약한 참고 신호입니다.",
                 "reason": (f"Challenger 만 Gate 1(≥{thr}, CI 하한 >{CI_LOWER_MIN:.0%}, n≥{MIN_N_CORE}) 통과(비교 대상 없음) — "
                           f"약한 방향성 참고 신호로 Challenger 단독 채택(고신뢰 확정 아님). {_gate1_why('Baseline', base_d) or ''}")}
 
@@ -111,9 +115,11 @@ def decide_champion(baseline_metrics: dict, challenger_metrics: dict) -> dict:
                     "ci_ok": ci_ok, "passed": passed}
     if passed:
         return {**out, "champion": "CHALLENGER", "branch": 3,
+                "plain_reason": "복잡한 모델이 단순한 모델보다 눈에 띄게 나아서 이쪽을 기준으로 삼았습니다.",
                 "reason": f"둘 다 Gate 1 통과 → Gate 2 통과(+{margin * 100:.1f}%p, CI 하한 > Baseline) — "
                           "Challenger 채택(여전히 참고용 방향성 신호, 고신뢰 확정 아님)"}
     return {**out, "champion": "BASELINE", "branch": 3,
+            "plain_reason": "복잡한 모델이 단순한 모델보다 확실히 낫다고 보기 어려워서, 더 단순한 쪽을 기준으로 삼았습니다.",
             "reason": f"둘 다 Gate 1 통과 → Gate 2 미달({margin * 100:+.1f}%p"
                       f"{'' if ci_ok else ', CI 하한 ≤ Baseline'}) — "
                       "더 단순한 Baseline 채택(참고용 방향성 신호, 고신뢰 확정 아님)"}

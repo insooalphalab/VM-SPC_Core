@@ -284,6 +284,9 @@ def main() -> int:
             render_basket(basket)
     if failed:
         log.warning("실패/생략 바스켓: %s", failed)
+    if not args.no_render and args.label_mode == "relative":
+        from vm_spc.build_index import build_index
+        build_index()  # results/index.html — 전체 ETF 한눈에 보기, 디스크 전체를 다시 스캔해 항상 최신 상태로 만듦
     return 1 if failed and len(failed) == len(baskets) else 0
 
 

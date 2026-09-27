@@ -20,23 +20,58 @@ from datetime import datetime, timedelta
 
 from kis_client import RateLimitedCaller, fetch_daily_bars
 from v2_config import KST, basket_codes, get_basket
-from v2_datastore import save_bars
+from v2_datastore import load_bars, save_bars
 
 log = logging.getLogger("v2_data_collector")
-DEFAULT_HISTORY_DAYS = 1095   # 약 3년 — 워밍업(칼만·매물대 500봉) + 충분한 백테스트 구간 확보용
+DEFAULT_HISTORY_DAYS = 1095   # 약 3년 — 워밍업(칼만·매물대 500봉) + 충분한 백테스트 구간 확보용. 최초 백필에만 쓰인다.
+REFRESH_DAYS = 15             # 기존 데이터가 있어도 최근 이만큼은 다시 받는다(겹치는 구간으로 소급 조정 감지)
+ADJUST_TOL = 0.005            # 겹치는 날짜 종가가 기존 값과 이 비율 이상 다르면 소급 조정으로 보고 전체 재수집
+
+
+def _adjusted_since(existing, rows: list[dict]) -> bool:
+    """액면분할·무상증자 등으로 KIS 수정주가가 과거 전체에 소급 조정됐는지 — 최근 구간만 덮어쓰면
+    조정 전/후 가격이 섞여 시계열이 끊기므로, 겹치는 날짜의 종가를 비교해 감지한다."""
+    for r in rows:
+        ts = datetime.strptime(r["date"], "%Y%m%d")
+        if ts in existing.index:
+            old = existing.at[ts, "close"]
+            if old > 0 and abs(r["close"] - old) / old > ADJUST_TOL:
+                return True
+    return False
+
+
+def update_bars(caller: RateLimitedCaller, basket_name: str, code: str, days: int) -> tuple[int, str] | None:
+    """종목 하나를 최신화한다. 저장분이 있으면 최근 REFRESH_DAYS 만 받아 병합(증분), 없거나 소급
+    조정이 감지되면 전체 재수집(백필). 반환: (받은 행 수, "증분"|"백필"|"조정 재수집") 또는 None."""
+    today = datetime.now(KST).date()
+    full_start = today - timedelta(days=days)
+    existing = load_bars(basket_name, code)
+    if existing is not None and not existing.empty:
+        start = max(full_start, existing.index.max().date() - timedelta(days=REFRESH_DAYS))
+        rows = fetch_daily_bars(caller, code, start, today)
+        if not rows:
+            return None
+        if not _adjusted_since(existing, rows):
+            save_bars(basket_name, code, rows, merge=True)
+            return len(rows), "증분"
+        mode = "조정 재수집"
+    else:
+        mode = "백필"
+    rows = fetch_daily_bars(caller, code, full_start, today)
+    if not rows:
+        return None
+    save_bars(basket_name, code, rows, merge=False)
+    return len(rows), mode
 
 
 def collect(basket: dict, days: int) -> None:
     caller = RateLimitedCaller()
-    today = datetime.now(KST).date()
-    start = today - timedelta(days=days)
     for code, name in basket_codes(basket).items():
-        rows = fetch_daily_bars(caller, code, start, today)
-        if not rows:
+        res = update_bars(caller, basket["name"], code, days)
+        if res is None:
             log.warning("%s(%s): 수집된 일봉 없음", name, code)
             continue
-        save_bars(basket["name"], code, rows)
-        log.info("%s(%s): %d개 수집", name, code, len(rows))
+        log.info("%s(%s): (%s) %d개 수집", name, code, res[1], res[0])
 
 
 def main() -> int:

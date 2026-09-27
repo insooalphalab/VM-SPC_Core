@@ -45,27 +45,27 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
-from kis_client import RateLimitedCaller, fetch_daily_bars
+from kis_client import RateLimitedCaller
 from pair_config import PairParams, pair_results_dir
 from pair_cointegration import analyze_pair
 from v2_config import KST, get_basket
-from v2_datastore import load_bars, save_bars
+from v2_data_collector import update_bars
+from v2_datastore import load_bars
 from v2_etf_scanner import fetch_top_holdings
 
 log = logging.getLogger("pair_representativeness")
 
 
-def _ensure_bars(basket_name: str, code: str, days: int, caller: RateLimitedCaller) -> pd.DataFrame | None:
-    """이미 수집된 종목이면 재사용, 아니면(대표종목 후보가 기존 센서 목록 밖일 수 있음) 새로 수집."""
+def _ensure_bars(basket_name: str, code: str, days: int, caller: RateLimitedCaller,
+                 fresh_as_of: pd.Timestamp | None = None) -> pd.DataFrame | None:
+    """저장분이 fresh_as_of(타겟 ETF 최신일)까지 있으면 재사용, 아니면 증분 갱신/신규 수집.
+    대표종목 후보는 센서 목록 밖일 수 있어 Stage1 수집 대상이 아니므로, 여기서 직접 최신화하지
+    않으면 처음 받은 날에 멈춘 데이터로 계속 계산된다."""
     bars = load_bars(basket_name, code)
-    if bars is not None and not bars.empty:
+    if bars is not None and not bars.empty and (fresh_as_of is None or bars.index.max() >= fresh_as_of):
         return bars
-    from datetime import timedelta
-    today = datetime.now(KST).date()
-    rows = fetch_daily_bars(caller, code, today - timedelta(days=days), today)
-    if not rows:
+    if update_bars(caller, basket_name, code, days) is None:
         return None
-    save_bars(basket_name, code, rows)
     return load_bars(basket_name, code)
 
 
@@ -117,7 +117,7 @@ def run(basket: dict, p: PairParams) -> dict:
         if not (0 < w_a < 0.95):
             log.info("%s(%s): 비중 %.2f%% 비정상 — 후보 제외", name, code, w_pct)
             continue
-        bars = _ensure_bars(basket["name"], code, p.history_days, caller)
+        bars = _ensure_bars(basket["name"], code, p.history_days, caller, fresh_as_of=target_bars.index.max())
         if bars is None or bars.empty:
             log.warning("%s(%s): 일봉 확보 실패 — 후보 제외", name, code)
             continue

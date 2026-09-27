@@ -1,9 +1,10 @@
 # VM-SPC Core (KIS_TA V2)
 
-V1(5대시그널 스코어카드, 실전용)의 칼만필터·신호 계산을 재사용해 **가상계측(Virtual Metrology)**
-과 **SPC 드리프트 탐지(CUSUM + Hotelling's T²)** 를 증명하는 포트폴리오/해커톤용 확장입니다.
-실사용(매매 판단) 목적이 아니라, 반도체 FDC/VM 엔지니어링 패턴이 주식 데이터로 그대로
-전이되는지를 코드와 시각화로 보여주는 데 목적이 있습니다. 설계 배경은 `kis_ta_v2_design.md` 참고.
+V1(5대시그널 스코어카드)의 칼만필터·신호 계산을 재사용해 반도체 FDC/VM 엔지니어링 패턴
+(**가상계측(Virtual Metrology)** + **SPC 드리프트 탐지(CUSUM + Hotelling's T²)**)으로 섹터 ETF와
+구성종목의 **익일 방향과 그 확률**을 매일 장 마감 후 산출하는 도구입니다. 39개 섹터 ETF를 평일
+16:30에 자동으로 갱신하고, 결과를 텔레그램과 구글 드라이브로 받아 봅니다. 자동 주문은 없으며
+진입 여부는 사람이 판단합니다. 설계 배경은 `kis_ta_v2_design.md` 참고.
 
 ```
 센서(top N 종목) VM Score(4개 신호, 수급 제외) 균등가중 평균
@@ -32,7 +33,8 @@ vm_spc/       — 챔피언-챌린저(VM-SPC Core) 의사결정 보조 모델: L
                 dashboard_v2.html 에 "챔피언-챌린저" 탭으로 결과를 얹습니다.
 pair_spc/     — 대표종목 상관관계(PAIR-SPC) 파이프라인(신규): Stage0 대표종목 실증 → Stage1/2
                 공적분·SPC. vm_predict의 dashboard_v2.html에 탭으로 결과를 얹습니다.
-data/ results/ state/  — 이전과 동일하게 프로젝트 루트에 그대로 있습니다(폴더 이동과 무관)
+scripts/      — 매일 자동 실행용 배치(작업 스케줄러가 호출)
+data/ results/ state/ logs/  — 자동 생성물(.gitignore 대상)
 ```
 
 ## 빠른 시작
@@ -53,6 +55,34 @@ python vm_spc/pipeline.py                                          # 챔피언-�
 `basket_watchlist.json`에 타겟 ETF가 지정된 섹터가 여러 개면 `v2_run.py`가 전부 순서대로 처리합니다.
 특정 하나만: `python vm_predict/v2_run.py --basket semiconductor_to_etf`. 이미 수집한 데이터로
 연산·화면만 다시: `python vm_predict/v2_run.py --no-fetch`(API 호출 안 함, `data/*.csv` 재사용).
+
+일봉 수집은 **증분 방식**입니다 — 처음 보는 종목만 약 3년치(1095일)를 백필하고, 이후에는 저장된
+마지막 날짜 기준 최근 15일만 다시 받아 병합합니다(종목당 API 1회). 겹치는 날짜의 종가가 기존 값과
+0.5% 넘게 다르면 액면분할·무상증자 등으로 수정주가가 소급 조정된 것으로 보고 그 종목만 전체를
+다시 받습니다(조정 전/후 가격이 섞여 시계열이 끊기는 것을 방지).
+
+### 매일 자동 실행 (작업 스케줄러 · 텔레그램 · 구글 드라이브)
+
+Windows 작업 스케줄러 "VM-SPC Core 일일 업데이트"가 **평일 16:30**에
+`scripts/run_daily_pipeline_hidden.vbs` → `scripts/run_daily_pipeline.ps1`을 실행합니다(PC가 켜져
+있을 때만, 꺼져 있었으면 켜질 때 따라잡음). 순서:
+
+1. `vm_predict/v2_run.py` — 일봉 증분 수집 → 연산 → 대시보드
+2. `pair_spc/run_pair_spc.py` — PAIR-SPC (대표종목 후보도 여기서 최신화)
+3. `vm_spc/pipeline.py` — 챔피언-챌린저 → `results/index.html` 재생성
+4. `results/` → `G:\내 드라이브\VM-SPC_Core\results` 미러링(robocopy `/MIR`, Drive for Desktop이 업로드)
+5. `vm_spc/notify_telegram.py` — 요약 + `index.html` 첨부 전송. 마지막으로 알린 거래일과 최신
+   거래일이 같으면(평일 휴장일) 전송을 생략하고, 앞 단계 실패 시에는 경고를 붙여 항상 전송합니다.
+
+로그는 `logs/pipeline_YYYYMMDD_HHMMSS.log`(30일 보관). 주의:
+
+- 창을 확실히 숨기려고 스케줄러는 PowerShell을 직접 부르지 않고 VBScript(`WScript.Shell.Run(cmd, 0)`)로
+  띄웁니다 — `powershell -WindowStyle Hidden`은 스케줄러 경유 시 인자가 누락돼 콘솔 창이 보이고,
+  그 창을 클릭하면 빠른 편집 모드로 프로세스가 멈추는 문제가 실제로 있었습니다.
+- `run_daily_pipeline.ps1`은 **UTF-8 BOM 포함**으로 저장해야 합니다. BOM이 없으면 Windows
+  PowerShell 5.1이 CP949로 읽어 한글 경로(`G:\내 드라이브`)가 깨집니다.
+- 텔레그램은 `.streamlit/secrets.toml`의 `TELEGRAM_BOT_TOKEN`·`TELEGRAM_CHAT_ID`를 씁니다.
+  내용만 확인: `python vm_spc/notify_telegram.py --dry-run`, 같은 거래일이어도 강제 전송: `--force`.
 
 ### basket_watchlist.json 형식
 
@@ -118,9 +148,24 @@ python vm_spc/pipeline.py --label-mode absolute            # 비교용 구버전
 - 한계: Point-in-time 구성종목 이력이 없어 현재 구성종목으로 근사합니다(생존편향, `vm_spc/universe.py`
   의 `POINT_IN_TIME_HISTORY` 를 채우면 해소). `coint_z` 는 ETF-ex-A 대신 타겟 ETF 대비 롤링 OLS
   스프레드입니다. 둘 다 대시보드 탭의 "검증 설정 · 한계"에 표시됩니다.
-- **현재 결과**: 검증 가능한 18개 바스켓 중 BASELINE 채택 9 / REJECTED 8 / CHALLENGER 채택 1.
-  대표 예시는 `semiconductor_krx_scan`(타겟 KODEX 반도체) — 예측모델·PAIR-SPC·챔피언-챌린저
-  3개 탭이 전부 실데이터로 채워진 유일한 바스켓입니다.
+- **현재 결과(2026-09-27, 39개 ETF)**: 검증 가능한 31개 중 BASELINE 15 / REJECTED 10 / CHALLENGER 6.
+  나머지 8개는 타겟 ETF가 최근 상장돼 유효 거래일이 280일 미만이라 대기 중입니다(같은 섹터의 다른
+  ETF로 커버되므로 데이터가 쌓일 때까지 기다림). 대표 예시는 `semiconductor_krx_scan`(타겟 KODEX 반도체).
+- 챔피언이 없는(REJECTED) 바스켓도 빈칸으로 두지 않고 Baseline 원값을 흐리게 "게이트 미달·참고"로
+  표시합니다 — 계산은 됐지만 기준을 못 넘은 것과, 데이터가 없어 계산 자체가 안 된 것을 구분합니다.
+
+`results/index.html`에 모든 ETF를 한 화면(카드형, 모바일 대응)에서 봅니다. 카드마다 성격이 다른 두
+예측을 분리해서 보여줍니다:
+
+- **ETF 자체 예측** — 예측모델(Breadth)이 그 ETF 자신의 익일 방향을 추정한 값과 과거 적중률.
+  이 적중률이 높은 순으로 정렬합니다(파이프라인의 1차 목표).
+- **구성종목 중 최고 신호** — 챔피언-챌린저가 바스켓 안 종목들끼리 비교해 가장 확신이 강한 종목.
+  상대적 우열일 뿐, "이 종목 때문에 ETF가 오른다"는 뜻이 아닙니다.
+
+외부 CDN 없이 CSS를 파일에 직접 넣어서, 텔레그램으로 받아 폰에서 열어도 그대로 보입니다. 각 카드는
+그 바스켓의 `dashboard_v2.html`로 연결됩니다(폴더 구조가 함께 있어야 하므로 폰에서는 구글 드라이브의
+`VM-SPC_Core/results`에서 여는 것을 권장). `python vm_spc/pipeline.py`(전체 바스켓, `--no-render`
+아닐 때)를 돌리면 자동으로 다시 생성됩니다. 따로 만들고 싶으면 `python vm_spc/build_index.py`.
 
 ### PAIR-SPC: 섹터 대표종목 실증 + 공적분 SPC (신규, 선택)
 
@@ -155,7 +200,7 @@ python pair_spc/pair_cointegration.py --basket <이름>              # Stage 1/2
 | `v2_config.py` | 경로(`ROOT`는 이 파일의 부모의 부모, 즉 프로젝트 루트)·`Params`(튜닝 임계값)·바스켓 로더 |
 | `kis_auth.py` / `kis_client.py` | 한투 Open API 인증·일봉 조회 (V1에서 독립 구성) |
 | `secrets_loader.py` | 비밀값 로더(환경변수 우선, 없으면 `.streamlit/secrets.toml`) |
-| `v2_datastore.py` | `data/{basket}/{code}.csv` 일봉 저장소 |
+| `v2_datastore.py` | `data/{basket}/{code}.csv` 일봉 저장소 (`save_bars(merge=True)`로 증분 병합) |
 | `v2_signals.py` | 4개 신호(가격밴드·거래량·매물대·상대강도) 연속값 + 시그모이드 VM Score |
 | `v2_kalman.py` | 인과적 칼만필터(로컬선형추세/로컬레벨) — V1과 동일 |
 | `v2_cusum.py` | 양방향 CUSUM 누적합 관리도 |
@@ -168,7 +213,7 @@ python pair_spc/pair_cointegration.py --basket <이름>              # Stage 1/2
 | 파일 | 역할 |
 |---|---|
 | `v2_run.py` | 3단계 한 번에 실행하는 통합 진입점 (`--basket`·`--no-fetch` 지원) |
-| `v2_data_collector.py` | Stage 1 — 센서·타겟 일봉(`FHKST03010100`) 수집 |
+| `v2_data_collector.py` | Stage 1 — 센서·타겟 일봉(`FHKST03010100`) 증분 수집 + 수정주가 소급 조정 감지(`update_bars`) |
 | `v2_compute_engine.py` | Stage 2 — VM Score·Breadth·컨퓨전매트릭스·CUSUM·T²·일일 리포트 연산 |
 | `v2_render_dashboard.py` | Stage 3 — 단일 HTML 대시보드 생성 (PAIR-SPC 탭도 여기서 얹음) |
 | `v2_explain.py` | breadth/T² 신호를 종목별·신호별로 사후 분해(CLI, `--report`로 요약문 출력) |
@@ -179,7 +224,7 @@ python pair_spc/pair_cointegration.py --basket <이름>              # Stage 1/2
 | 파일 | 역할 |
 |---|---|
 | `run_pair_spc.py` | Stage0→1/2 한 번에 실행 + 대시보드 재렌더링 |
-| `pair_representativeness.py` | Stage 0 — ex-self 지수 대조로 섹터 대표종목 실증 |
+| `pair_representativeness.py` | Stage 0 — ex-self 지수 대조로 섹터 대표종목 실증 (센서 밖 후보 종목도 타겟 최신일까지 갱신) |
 | `pair_cointegration.py` | Stage 1/2 — OLS 공적분 회귀·ADF·Half-life·히스테리시스 SPC |
 | `pair_config.py` | PAIR-SPC 전용 경로·`PairParams` |
 
@@ -195,12 +240,22 @@ python pair_spc/pair_cointegration.py --basket <이름>              # Stage 1/2
 | `models/` | `legacy_rule.py`(VM Score≥0.75) / `ridge_baseline.py` / `lgbm_challenger.py`(조기종료 적용) |
 | `evaluation.py` | Tier1/2 지표·Brier·F1 + 날짜 클러스터 부트스트랩 CI(B=1000) |
 | `gate_decision.py` | 3-분기 Gated Two-Stage 챔피언 판정 |
+| `build_index.py` | `results/index.html` — 전체 ETF를 ETF 자체 예측 적중률 순으로 한 화면에 정리 |
+| `notify_telegram.py` | 일일 요약 + `index.html` 텔레그램 전송 (같은 거래일 중복 전송 방지) |
+
+### scripts/ — 자동 실행
+
+| 파일 | 역할 |
+|---|---|
+| `run_daily_pipeline_hidden.vbs` | 작업 스케줄러가 호출하는 진입점 — 창 없이 아래 .ps1 실행 |
+| `run_daily_pipeline.ps1` | 수집→PAIR-SPC→챔피언-챌린저→드라이브 동기화→텔레그램 순차 실행 + 로그 (UTF-8 BOM 필수) |
 
 ### 루트
 
 | 파일 | 역할 |
 |---|---|
-| `basket_watchlist.json` | 종목별 테마 태그 + 테마별 타겟 ETF 실제 구성 — `.gitignore` 대상 |
+| `basket_watchlist.json` | 종목별 테마 태그 + 테마별 타겟 ETF 실제 구성(현재 39개 테마) — `.gitignore` 대상 |
+| `VM_SPC_Core_검증이력.md` | 챔피언-챌린저 검증 과정과 운영 중 수정 이력 |
 
 ## 설계상 확정된 판단 (구현 시 참고)
 
@@ -226,9 +281,12 @@ python pair_spc/pair_cointegration.py --basket <이름>              # Stage 1/2
   (0.2%에서 1.73) 바스켓마다 효과 크기가 다릅니다. `breadth_threshold` 재탐색과 달리 "결과가
   좋은 값을 사후에 고른" 다중비교가 아니라 "확신 없는 날은 판정을 안 한다"는 사전에 동기부여된
   규칙이라는 점에서 성격이 다릅니다. 근거는 `v2_config.Params.dead_zone` 주석에 상세히 남겼습니다.
+- **`breadth_threshold`는 0.345로 고정합니다.** 데이터가 바뀔 때마다 다시 지정하지 않기로 한
+  운영상 결정입니다. 다만 이 값은 과거 전체 기간 분포로 정한 것이라, index/대시보드의 "ETF 자체
+  예측 과거 적중률"은 약간 낙관적으로 편향돼 있을 수 있다는 점을 감안해서 봅니다.
 
 ## 참고
 
 - 모든 계산은 인과적입니다(미래 데이터를 쓰지 않음, look-ahead 방지). 임계값은 `v2_config.Params`
-  에 모여 있고 백테스트로 튜닝하는 것을 전제로 한 초기값입니다.
-- 이 도구는 방법론 검증용이며 투자 권유가 아닙니다.
+  에 모여 있습니다.
+- 장 마감 후 계산한 참고용 방향 신호이며 투자 권유가 아닙니다. 자동 주문은 하지 않습니다.

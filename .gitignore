@@ -17,6 +17,8 @@ results/
 kis_token_cache.json
 *.parquet
 *.log
+# 일일 배치 로그·텔레그램 마지막 알림 거래일
+logs/
 
 # ── python / 환경 ────────────────────────────────────────
 __pycache__/

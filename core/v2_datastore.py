@@ -21,10 +21,17 @@ def bars_path(basket_name: str, code: str) -> Path:
     return data_dir() / basket_name / f"{code}.csv"
 
 
-def save_bars(basket_name: str, code: str, rows: list[dict]) -> None:
+def save_bars(basket_name: str, code: str, rows: list[dict], merge: bool = False) -> None:
+    """rows 를 저장한다. merge=True 면 기존 CSV 와 합쳐서 겹치는 날짜는 새 값으로 덮어쓴다
+    (증분 수집 시 이미 저장된 과거분을 보존하면서 KIS 수정주가 소급 정정도 반영하기 위함)."""
     path = bars_path(basket_name, code)
     path.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(rows, columns=["date", *BAR_COLS]).to_csv(path, index=False, encoding="utf-8-sig")
+    new_df = pd.DataFrame(rows, columns=["date", *BAR_COLS])
+    if merge and path.exists():
+        old_df = pd.read_csv(path, dtype={"date": str})
+        new_df = pd.concat([old_df, new_df], ignore_index=True)
+        new_df = new_df.drop_duplicates("date", keep="last").sort_values("date")
+    new_df.to_csv(path, index=False, encoding="utf-8-sig")
 
 
 def load_bars(basket_name: str, code: str) -> pd.DataFrame | None:
