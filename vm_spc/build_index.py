@@ -32,6 +32,7 @@ import logging
 import sys
 
 from v2_config import KST, load_baskets, results_dir
+from v2_render_dashboard import validated_etf_extras
 
 log = logging.getLogger("vm_spc.build_index")
 
@@ -40,9 +41,10 @@ def _load_json(path):
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
 
 
-def _etf_prediction(summary: dict) -> dict | None:
+def _etf_prediction(summary: dict, extras: dict | None = None) -> dict | None:
     """Panel 1(예측모델/Legacy)의 '내일(T+1) 예측'을 그대로 재현 — ETF 자기 자신의 방향 예측.
-    대시보드 헤더 JS(오늘 기준 실시간 예측 카드, v2_render_dashboard.py TEMPLATE)와 로직을 맞췄다."""
+    대시보드 헤더 JS(오늘 기준 실시간 예측 카드, v2_render_dashboard.py TEMPLATE)와 로직을 맞췄다.
+    괴리율 조건이 검증을 통과해 있으면(extras["premium"]) 과거 같은 조건에서의 적중률을 쓴다."""
     br, cm, p = summary["breadth_series"], summary["confusion_matrix"], summary["params"]
     vals = br["breadth"]
     i = len(vals) - 1
@@ -54,7 +56,14 @@ def _etf_prediction(summary: dict) -> dict | None:
     pred_up = val >= p["breadth_threshold"]
     npv = (cm["tn"] / (cm["tn"] + cm["fn"])) if (cm["tn"] + cm["fn"]) else None
     hit_rate = cm["precision"] if pred_up else npv
-    return {"date": br["dates"][i], "pred_up": pred_up, "hit_rate": hit_rate}
+    base = cm.get("base_rate")
+    usual = None if base is None else (base if pred_up else 1 - base)
+    premium = None
+    if extras and extras.get("date") == br["dates"][i] and extras.get("pred_up") == pred_up:
+        premium = extras.get("premium")
+        if premium and premium.get("hit_rate") is not None:
+            hit_rate = premium["hit_rate"]
+    return {"date": br["dates"][i], "pred_up": pred_up, "hit_rate": hit_rate, "usual": usual, "premium": premium}
 
 
 def _top_sensor_signal(vm: dict) -> tuple[dict, float, bool] | None:
@@ -101,7 +110,7 @@ def collect_rows() -> list[dict]:
             "basket": name, "etf_name": target["name"], "etf_code": target["code"],
             "n_sensors": len(summary["basket"]["sensors"]),
             "has_dashboard": dash_path.exists(),
-            "etf_pred": _etf_prediction(summary),
+            "etf_pred": _etf_prediction(summary, validated_etf_extras(name)),
             "champion": None, "top": None, "top_p": None, "top_validated": False, "gap": -1.0,
         }
         vm = _load_json(bdir / "vm_spc" / "vm_spc_dashboard_data.json")
@@ -126,10 +135,16 @@ def _etf_pred_cell(r: dict) -> str:
     ep = r["etf_pred"]
     if ep is None:
         return '<span class="c-empty">—</span>'
-    up, hr = ep["pred_up"], ep["hit_rate"]
+    up, hr, pr = ep["pred_up"], ep["hit_rate"], ep.get("premium")
     arrow, label, cls = ("&#9650;", "상승", "c-up") if up else ("&#9660;", "하락", "c-flat")
-    hr_str = f"(과거 적중 {hr:.0%})" if hr is not None else ""
-    return f'<span class="val {cls}">{arrow} {label}</span> <span class="sub">{hr_str}</span>'
+    usual = ep.get("usual")
+    hr_str = (f"(적중 {hr:.0%}" + (f" · 평소 {usual:.0%})" if usual is not None else ")")) if hr is not None else ""
+    note = ""
+    if pr and pr["state"] != "중립":
+        note_cls = "c-up" if pr["state"] == "동의" else "c-warn"
+        note = (f'<span class="note-block">괴리율 {pr["dprt"]:+.2f}% · '
+                f'<span class="{note_cls}">예측과 {"같은" if pr["state"] == "동의" else "반대"} 방향</span></span>')
+    return f'<span class="val {cls}">{arrow} {label}</span> <span class="sub">{hr_str}</span>{note}'
 
 
 def _sensor_signal_cell(r: dict) -> str:
@@ -218,6 +233,7 @@ TEMPLATE = r"""<!DOCTYPE html>
   .c-flat { color:#cbd5e1; }
   .c-muted { color:#94a3b8; }
   .c-empty { color:#475569; }
+  .c-warn { color:#fbbf24; }
   .sub { color:#64748b; font-size:0.75rem; }
   .note-inline { color:#475569; font-size:0.68rem; }
   .note-block { display:block; color:#475569; font-size:0.68rem; }
@@ -227,9 +243,10 @@ TEMPLATE = r"""<!DOCTYPE html>
 <body>
   <header class="card">
     <h1>VM-SPC Core — 전체 ETF 현황</h1>
-    <p>이 파이프라인의 1차 목표인 <b>ETF 자체 예측</b>의 과거 적중률이
-      높은 순으로 정렬했습니다(__N_TOTAL__개 중 적중률 60% 이상 __N_SIGNAL__개). 구성종목 신호는 참고용으로
-      옆에 같이 둡니다. 자세한 근거는 각 ETF를 눌러 확인하세요.</p>
+    <p>이 파이프라인의 1차 목표인 <b>ETF 자체 예측</b>의 적중률이 높은 순으로 정렬했습니다(__N_TOTAL__개 중
+      60% 이상 __N_SIGNAL__개). 적중률은 그 ETF를 같은 방향으로 예측했던 날의 적중률에 오늘 괴리율 효과(전체 ETF
+      합산 추정)를 반영한 값이고, <b>평소</b>는 예측과 상관없이 그 방향으로 움직인 날의 비율입니다 — 적중률이 평소보다
+      얼마나 높은지가 실제 예측 실력입니다. 구성종목 신호는 참고용이고, 자세한 근거는 각 ETF를 눌러 확인하세요.</p>
     <p class="meta">생성 시각: __GENERATED_AT__</p>
   </header>
 

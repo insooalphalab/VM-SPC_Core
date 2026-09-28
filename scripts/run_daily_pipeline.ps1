@@ -98,6 +98,8 @@ if (Test-Path "G:\") {
     New-Item -ItemType Directory -Force -Path $driveRoot | Out-Null
     robocopy (Join-Path $root "results") (Join-Path $driveRoot "results") /MIR /NFL /NDL /R:1 /W:2 | Out-Null
     $rcSync = $LASTEXITCODE   # robocopy: 0-7 = 성공(변경 종류별 코드), 8 이상 = 실패
+    # basket_watchlist.json 은 .gitignore 대상이라(깃허브에 올리지 않음) 드라이브가 유일한 백업이다.
+    Copy-Item (Join-Path $root "basket_watchlist.json") (Join-Path $driveRoot "basket_watchlist.json") -Force -ErrorAction SilentlyContinue
     Write-Utf8Line "===== [Google Drive 동기화] END (robocopy exit=$rcSync) $(Get-Date -Format o) ====="
 } else {
     Write-Utf8Line "`n===== [Google Drive 동기화] SKIP — G: 드라이브 연결 안 됨 $(Get-Date -Format o) ====="

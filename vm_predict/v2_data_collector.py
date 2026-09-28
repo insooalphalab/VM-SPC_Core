@@ -18,9 +18,9 @@ import logging
 import sys
 from datetime import datetime, timedelta
 
-from kis_client import RateLimitedCaller, fetch_daily_bars
+from kis_client import RateLimitedCaller, fetch_daily_bars, fetch_etf_listed_shares, fetch_nav_daily
 from v2_config import KST, basket_codes, get_basket
-from v2_datastore import load_bars, save_bars
+from v2_datastore import append_shares, load_bars, load_nav, save_bars, save_nav
 
 log = logging.getLogger("v2_data_collector")
 DEFAULT_HISTORY_DAYS = 1095   # 약 3년 — 워밍업(칼만·매물대 500봉) + 충분한 백테스트 구간 확보용. 최초 백필에만 쓰인다.
@@ -64,6 +64,25 @@ def update_bars(caller: RateLimitedCaller, basket_name: str, code: str, days: in
     return len(rows), mode
 
 
+def update_nav(caller: RateLimitedCaller, basket_name: str, code: str, days: int) -> tuple[int, str] | None:
+    """타겟 ETF 의 NAV·괴리율 이력을 최신화하고, 오늘 상장좌수 스냅샷을 쌓는다.
+    괴리율은 비율(%)이라 수정주가 소급 조정의 영향을 받지 않으므로 증분 병합만 한다."""
+    today = datetime.now(KST).date()
+    full_start = today - timedelta(days=days)
+    existing = load_nav(basket_name, code)
+    merge = existing is not None and not existing.empty
+    start = max(full_start, existing.index.max().date() - timedelta(days=REFRESH_DAYS)) if merge else full_start
+    rows = fetch_nav_daily(caller, code, start, today)
+    if not rows:
+        return None
+    save_nav(basket_name, code, rows, merge=merge)
+    # 상장좌수는 이력 API 가 없어 날짜를 마지막 NAV 거래일로 찍어 매일 한 줄씩 쌓는다(주말 재실행은 같은 날짜로 덮어씀)
+    shares = fetch_etf_listed_shares(caller, code)
+    if shares is not None:
+        append_shares(basket_name, code, rows[-1]["date"], shares)
+    return len(rows), "증분" if merge else "백필"
+
+
 def collect(basket: dict, days: int) -> None:
     caller = RateLimitedCaller()
     for code, name in basket_codes(basket).items():
@@ -72,6 +91,16 @@ def collect(basket: dict, days: int) -> None:
             log.warning("%s(%s): 수집된 일봉 없음", name, code)
             continue
         log.info("%s(%s): (%s) %d개 수집", name, code, res[1], res[0])
+    target = basket["target"]
+    try:
+        res = update_nav(caller, basket["name"], target["code"], days)
+        if res is None:
+            log.warning("%s(%s): NAV·괴리율 이력 없음", target["name"], target["code"])
+        else:
+            log.info("%s(%s): NAV·괴리율 (%s) %d개 수집", target["name"], target["code"], res[1], res[0])
+    except Exception:
+        # 괴리율은 보조 입력이라, 실패해도 기존 예측(일봉 기반)은 그대로 진행한다
+        log.exception("%s(%s): NAV·괴리율 수집 실패 — 건너뜀", target["name"], target["code"])
 
 
 def main() -> int:

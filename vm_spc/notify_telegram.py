@@ -83,7 +83,8 @@ def build_digest(run_status: str = "ok") -> str:
         for r in etf_hits[:TOP_N]:
             ep = r["etf_pred"]
             arrow = "▲" if ep["pred_up"] else "▼"
-            lines.append(f"{arrow} {r['etf_name']} (과거 적중 {ep['hit_rate']:.0%})")
+            usual = f", 평소 {ep['usual']:.0%}" if ep.get("usual") is not None else ""
+            lines.append(f"{arrow} {r['etf_name']} (적중 {ep['hit_rate']:.0%}{usual})")
 
     lines.append("")
     lines.append("자동 주문 없음 · 참고용 방향 신호입니다. 전체 목록은 첨부한 index.html 참고.")

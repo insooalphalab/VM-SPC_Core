@@ -29,6 +29,10 @@ DAILY_PATH = "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice"
 DAILY_TR = "FHKST03010100"                     # 일봉: 1콜 최대 100건
 STOCKINFO_PATH = "/uapi/domestic-stock/v1/quotations/search-stock-info"
 STOCKINFO_TR = "CTPF1002R"                     # 상품기본조회(종목명·업종) — 종목코드 검증용
+NAV_DAILY_PATH = "/uapi/etfetn/v1/quotations/nav-comparison-daily-trend"
+NAV_DAILY_TR = "FHPST02440200"                 # ETF NAV 비교추이(일): 1콜 최대 100건, 과거 구간 지정 가능
+ETF_PRICE_PATH = "/uapi/etfetn/v1/quotations/inquire-price"
+ETF_PRICE_TR = "FHPST02400000"                 # ETF 현재가 — 상장좌수는 여기에만 있음(이력 API 없음)
 
 DAILY_SPAN_DAYS = 140    # 100거래일 ≈ 140달력일 → 1콜당 100건 한도 안에 들어오도록 구간 분할
 
@@ -114,6 +118,38 @@ def fetch_daily_bars(caller: RateLimitedCaller, code: str, start: date, end: dat
             break
         cursor_end = win_start - timedelta(days=1)
     return [rows[k] for k in sorted(rows)]
+
+
+def fetch_nav_daily(caller: RateLimitedCaller, code: str, start: date, end: date) -> list[dict]:
+    """ETF [start, end] 일별 NAV·종가·괴리율(dprt, %). fetch_daily_bars 와 같은 구간 분할. 오름차순 반환."""
+    rows: dict[str, dict] = {}
+    cursor_end = end
+    while cursor_end >= start:
+        win_start = max(start, cursor_end - timedelta(days=DAILY_SPAN_DAYS))
+        body = caller.get(NAV_DAILY_PATH, NAV_DAILY_TR, {
+            "FID_COND_MRKT_DIV_CODE": "J",
+            "FID_INPUT_ISCD": code,
+            "FID_INPUT_DATE_1": _ymd(win_start),
+            "FID_INPUT_DATE_2": _ymd(cursor_end),
+        })
+        got = 0
+        for r in body.get("output") or []:
+            d = r.get("stck_bsop_date")
+            nav, close, dprt = (_to_float(r.get(k)) for k in ("nav", "stck_clpr", "dprt"))
+            if not d or None in (nav, close, dprt) or nav <= 0:
+                continue
+            rows[d] = {"date": d, "nav": nav, "close": close, "dprt": dprt}
+            got += 1
+        if got == 0:
+            break
+        cursor_end = win_start - timedelta(days=1)
+    return [rows[k] for k in sorted(rows)]
+
+
+def fetch_etf_listed_shares(caller: RateLimitedCaller, code: str) -> float | None:
+    """ETF 현재 상장좌수(설정·환매로 변함). 과거 이력 API 가 없어 매일 스냅샷으로 쌓는다."""
+    body = caller.get(ETF_PRICE_PATH, ETF_PRICE_TR, {"fid_cond_mrkt_div_code": "J", "fid_input_iscd": code})
+    return _to_float((body.get("output") or {}).get("lstn_stcn"))
 
 
 def fetch_stock_name(caller: RateLimitedCaller, code: str) -> str:

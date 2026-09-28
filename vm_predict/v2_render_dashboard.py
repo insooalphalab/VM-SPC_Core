@@ -147,14 +147,39 @@ TEMPLATE = r"""<!DOCTYPE html>
       const val = br.breadth[i], date = br.dates[i];
       const predUp = val >= p.breadth_threshold;
       const npv = (cm.tn + cm.fn) ? cm.tn / (cm.tn + cm.fn) : null;
-      const hitRate = predUp ? cm.precision : npv;
-      const hitStr = hitRate === null ? 'N/A' : `${(hitRate * 100).toFixed(1)}%`;
+      const baseRate = predUp ? cm.precision : npv;
+      const usual = cm.base_rate === null ? null : (predUp ? cm.base_rate : 1 - cm.base_rate);
+      const pct = x => x === null || x === undefined ? 'N/A' : `${(x * 100).toFixed(1)}%`;
+      const pp = x => `${x >= 0 ? '+' : ''}${(x * 100).toFixed(1)}%p`;
+      // 괴리율 보정(검증 통과 시에만 존재): 이 ETF의 같은 방향 적중률 + 전 ETF 합산 괴리율 효과
+      const ex = DATA.etf_extras && DATA.etf_extras.date === date ? DATA.etf_extras : null;
+      const pr = ex && ex.pred_up === predUp ? ex.premium : null;
+      const hitRate = pr ? pr.hit_rate : baseRate;
+      const prLine = pr ? `
+        <div class="text-xs text-slate-400 mt-1">괴리율 ${pr.dprt > 0 ? '+' : ''}${pr.dprt}%
+          (${pr.dz < 0 ? '평소보다 할인' : '평소보다 프리미엄'}) &middot;
+          <span class="${pr.state === '동의' ? 'text-emerald-400' : pr.state === '반대' ? 'text-amber-400' : 'text-slate-400'}">예측과 ${pr.state === '중립' ? '무관(중립)' : pr.state === '동의' ? '같은 방향' : '반대 방향'}</span>
+        </div>` : '';
+      const basis = `
+        <details class="mt-1"><summary class="text-[11px] text-slate-500 cursor-pointer">근거 보기</summary>
+          <div class="text-[11px] text-slate-500 mt-1">
+            이 ETF를 과거에 ${predUp ? '상승' : '하락'}으로 예측했던 날의 적중률은 ${pct(baseRate)}입니다.
+            ${pr ? `여기에 39개 ETF 전체에서 확인된 괴리율 효과(${pr.state} ${pp(pr.adjust)})를 더했습니다.
+            ETF 하나만 조건별로 쪼개면 표본이 약 40일이라 우연 변동이 효과보다 커서, 효과 크기는 전체 합산으로만 추정합니다.
+            괴리율(시장가-NAV)은 다음 날 0 쪽으로 되돌아가는 경향이 있어 할인이면 상승 예측에, 프리미엄이면 하락 예측에 유리합니다.` : ''}
+            '평소 ${pct(usual)}'는 예측과 상관없이 다음 날 ${predUp ? '오른' : '내린'} 날의 비율입니다 — 확률이 이 값보다 얼마나 높은지가 실제 예측 실력입니다.
+          </div>
+        </details>`;
+      const rl = ex && ex.pred_up === predUp && ex.reliability ? ex.reliability : null;
+      const rlLine = rl ? `<div class="text-xs mt-1 ${rl.grade === '높음' ? 'text-emerald-400' : rl.grade === '낮음' ? 'text-amber-400' : 'text-slate-400'}">
+          예측 신뢰도 ${rl.grade}${rl.reasons.length ? ' — ' + rl.reasons.join(', ') : ''}</div>` : '';
       el.innerHTML = `
         <div class="text-xs text-slate-400">${date} 기준 breadth ${val.toFixed(3)} (임계 ${p.breadth_threshold})</div>
         <div class="text-lg font-bold mt-1 ${predUp ? 'text-emerald-400' : 'text-slate-300'} hint"
-          title="과거 같은 방향(${predUp ? '상승' : '하락'})으로 예측했던 사례들의 실제 적중 비율 — 보정된 모형 확률 아님">
-          내일(T+1) 예측: ${predUp ? '상승' : '하락'} &middot; 확률 ${hitStr}
-        </div>`;
+          title="과거 같은 조건으로 예측했던 사례들의 실제 적중 비율 — 보정된 모형 확률 아님">
+          내일(T+1) 예측: ${predUp ? '상승' : '하락'} &middot; 확률 ${pct(hitRate)}
+          <span class="text-sm font-normal text-slate-400">(평소 ${pct(usual)})</span>
+        </div>${prLine}${rlLine}${basis}`;
     })();
 
     // ── 3개 시계열 패널(Panel 2~4) 날짜축 통일 — 분기(1/4/7/10월) 시작점에만 눈금 ──
@@ -1226,6 +1251,23 @@ def render(payload: dict) -> str:
     return html
 
 
+def validated_etf_extras(basket_name: str) -> dict | None:
+    """etf_extras.json 중 전 바스켓 풀링 검증을 통과한 항목만 남긴다(v2_etf_extras.py) — 통과 못 한
+    항목은 계산은 돼 있어도 화면에 쓰지 않는다. build_index.py 도 이 함수를 쓴다."""
+    path = results_dir() / basket_name / "etf_extras.json"
+    vpath = results_dir() / "etf_extras_validation.json"
+    if not path.exists() or not vpath.exists():
+        return None
+    extras = json.loads(path.read_text(encoding="utf-8"))
+    if not extras:
+        return None
+    validation = json.loads(vpath.read_text(encoding="utf-8"))
+    for key in ("premium", "reliability"):
+        if not validation.get(key, {}).get("validated"):
+            extras[key] = None
+    return extras
+
+
 def render_basket(basket: dict) -> int:
     """v2_summary_metrics.json → dashboard_v2.html. v2_run.py와 이 파일의 CLI 양쪽에서 재사용."""
     src = results_dir() / basket["name"] / "v2_summary_metrics.json"
@@ -1246,6 +1288,8 @@ def render_basket(basket: dict) -> int:
     champ_path = results_dir() / basket["name"] / "vm_spc" / "vm_spc_dashboard_data.json"
     if champ_path.exists():
         payload["vm_spc"] = json.loads(champ_path.read_text(encoding="utf-8"))
+
+    payload["etf_extras"] = validated_etf_extras(basket["name"])
 
     out = results_dir() / basket["name"] / "dashboard_v2.html"
     out.write_text(render(payload), encoding="utf-8")

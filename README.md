@@ -157,8 +157,10 @@ python vm_spc/pipeline.py --label-mode absolute            # 비교용 구버전
 `results/index.html`에 모든 ETF를 한 화면(카드형, 모바일 대응)에서 봅니다. 카드마다 성격이 다른 두
 예측을 분리해서 보여줍니다:
 
-- **ETF 자체 예측** — 예측모델(Breadth)이 그 ETF 자신의 익일 방향을 추정한 값과 과거 적중률.
-  이 적중률이 높은 순으로 정렬합니다(파이프라인의 1차 목표).
+- **ETF 자체 예측** — 예측모델(Breadth)이 그 ETF 자신의 익일 방향을 추정한 값과 적중률. 적중률은 그 ETF를
+  같은 방향으로 예측했던 날의 적중률에 오늘 괴리율 효과(동의 +3.1%p / 반대 -2.9%p 등, 전 ETF 합산 추정)를
+  더한 값이고, 옆의 **평소**는 예측과 상관없이 그 방향으로 움직인 날의 비율입니다 — 실력은 평소 대비 차이.
+  적중률이 높은 순으로 정렬합니다(파이프라인의 1차 목표).
 - **구성종목 중 최고 신호** — 챔피언-챌린저가 바스켓 안 종목들끼리 비교해 가장 확신이 강한 종목.
   상대적 우열일 뿐, "이 종목 때문에 ETF가 오른다"는 뜻이 아닙니다.
 
@@ -213,10 +215,13 @@ python pair_spc/pair_cointegration.py --basket <이름>              # Stage 1/2
 | 파일 | 역할 |
 |---|---|
 | `v2_run.py` | 3단계 한 번에 실행하는 통합 진입점 (`--basket`·`--no-fetch` 지원) |
-| `v2_data_collector.py` | Stage 1 — 센서·타겟 일봉(`FHKST03010100`) 증분 수집 + 수정주가 소급 조정 감지(`update_bars`) |
+| `v2_data_collector.py` | Stage 1 — 센서·타겟 일봉(`FHKST03010100`) 증분 수집 + 수정주가 소급 조정 감지(`update_bars`), 타겟 ETF NAV·괴리율(`FHPST02440200`)·상장좌수 스냅샷(`update_nav`) |
 | `v2_compute_engine.py` | Stage 2 — VM Score·Breadth·컨퓨전매트릭스·CUSUM·T²·일일 리포트 연산 |
 | `v2_render_dashboard.py` | Stage 3 — 단일 HTML 대시보드 생성 (PAIR-SPC 탭도 여기서 얹음) |
 | `v2_explain.py` | breadth/T² 신호를 종목별·신호별로 사후 분해(CLI, `--report`로 요약문 출력) |
+| `v2_premium.py` | 타겟 ETF 괴리율(시장가 vs NAV) 표준화·예측과의 동의/반대 판정 (보정값은 `v2_etf_extras`가 전 ETF 합산으로 추정) |
+| `v2_reliability.py` | 예측 신뢰도 지수(T² 유사도·적중 CUSUM·변동성 국면) — 검증 미통과로 현재 화면 미표시 |
+| `v2_etf_extras.py` | 위 둘을 전 바스켓 계산 + 풀링 검증(`results/etf_extras_validation.json`), 통과 항목만 화면 반영. `v2_run.py`가 자동 호출 |
 | `v2_investor_flow.py` | (실험적) 투자자별 순매수 수집 + 기타기관(기관합계-금융투자) CUSUM — 검증 결과 유의미한 예측력은 못 찾음, 인프라만 남겨둠 |
 
 ### pair_spc/ — 대표종목 상관관계(PAIR-SPC) 파이프라인 (신규)

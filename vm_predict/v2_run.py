@@ -24,6 +24,7 @@ import sys
 from v2_config import load_baskets
 from v2_compute_engine import run_basket as compute_basket
 from v2_data_collector import DEFAULT_HISTORY_DAYS, collect
+from v2_etf_extras import run_all as run_etf_extras
 from v2_render_dashboard import render_basket
 
 log = logging.getLogger("v2_run")
@@ -52,8 +53,14 @@ def main() -> int:
             collect(basket, args.days)
         if compute_basket(basket) != 0:
             failed.append(basket["name"])
-            continue
-        render_basket(basket)
+
+    # 괴리율 조건·신뢰도 지수는 전 바스켓 풀링으로 검증하므로, 모든 바스켓 연산이 끝난 뒤 한 번 돌리고
+    # 그 결과를 반영해 렌더링한다.
+    log.info("ETF 자체 예측 보강(괴리율 조건·신뢰도 지수) 계산 + 풀링 검증 중...")
+    run_etf_extras()
+    for basket in baskets:
+        if basket["name"] not in failed:
+            render_basket(basket)
 
     if failed:
         log.error("실패한 바스켓: %s", failed)
