@@ -23,7 +23,8 @@ from v2_config import KST, basket_codes, get_basket
 from v2_datastore import append_shares, load_bars, load_nav, save_bars, save_nav
 
 log = logging.getLogger("v2_data_collector")
-DEFAULT_HISTORY_DAYS = 1095   # 약 3년 — 워밍업(칼만·매물대 500봉) + 충분한 백테스트 구간 확보용. 최초 백필에만 쓰인다.
+DEFAULT_HISTORY_DAYS = 1825   # 약 5년(2026-09-28 3년→5년, 멀티 호라이즌 T+20 독립 표본 확보). 최초 백필에만 쓰이고,
+                              # 기존 종목의 과거 구간 확장은 backfill_history.py 로 1회 수동 실행한다.
 REFRESH_DAYS = 15             # 기존 데이터가 있어도 최근 이만큼은 다시 받는다(겹치는 구간으로 소급 조정 감지)
 ADJUST_TOL = 0.005            # 겹치는 날짜 종가가 기존 값과 이 비율 이상 다르면 소급 조정으로 보고 전체 재수집
 
@@ -36,6 +37,8 @@ def _adjusted_since(existing, rows: list[dict]) -> bool:
         if ts in existing.index:
             old = existing.at[ts, "close"]
             if old > 0 and abs(r["close"] - old) / old > ADJUST_TOL:
+                # 2026-09-28 정기 실행에서 67종목이 한꺼번에 감지돼 원인 추적용으로 남긴다(날짜·이전값·새값)
+                log.info("소급 조정 감지: %s 종가 %s → %s (%+.2f%%)", r["date"], old, r["close"], (r["close"] / old - 1) * 100)
                 return True
     return False
 

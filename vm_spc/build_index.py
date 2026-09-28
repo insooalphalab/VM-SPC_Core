@@ -32,7 +32,12 @@ import logging
 import sys
 
 from v2_config import KST, load_baskets, results_dir
+import pandas as pd
+
+from v2_compression import compression_frame, current_state, pooled_expansion
+from v2_datastore import load_bars
 from v2_render_dashboard import validated_etf_extras
+from etf_rank.render import INDEX_CSS as RANK_CSS, index_card_html as rank_index_card_html, load as load_etf_rank
 
 log = logging.getLogger("vm_spc.build_index")
 
@@ -96,6 +101,17 @@ def _top_sensor_signal(vm: dict) -> tuple[dict, float, bool] | None:
     return (best, best["p_baseline"], False) if best is not None else None
 
 
+_COMP_CACHE: dict[str, pd.DataFrame] = {}
+
+
+def _compression(basket: dict) -> pd.DataFrame | None:
+    code = basket["target"]["code"]
+    if code not in _COMP_CACHE:
+        bars = load_bars(basket["name"], code)
+        _COMP_CACHE[code] = compression_frame(bars) if bars is not None and len(bars) > 150 else None
+    return _COMP_CACHE[code]
+
+
 def collect_rows() -> list[dict]:
     rows = []
     for basket in load_baskets():
@@ -113,6 +129,8 @@ def collect_rows() -> list[dict]:
             "etf_pred": _etf_prediction(summary, validated_etf_extras(name)),
             "champion": None, "top": None, "top_p": None, "top_validated": False, "gap": -1.0,
         }
+        cf = _compression(basket)
+        row["compression"] = current_state(cf) if cf is not None else None
         vm = _load_json(bdir / "vm_spc" / "vm_spc_dashboard_data.json")
         if vm is not None:
             row["champion"] = vm["decision"]["champion"]
@@ -169,6 +187,14 @@ def _sensor_signal_cell(r: dict) -> str:
             f'<span class="val {cls} strong">{conf:.0%}</span>{suffix}')
 
 
+def _compression_badge(r: dict) -> str:
+    cs = r.get("compression")
+    if not cs or not cs["compressed"]:
+        return ""
+    return (f'<div class="comp-badge" title="20일 변동성·고저폭이 모두 자기 과거 250일 중 하위 20% — 곧 크게 움직일 가능성이 '
+            f'평소보다 높지만 방향은 알려주지 않습니다">&#9889; 응축 중 {cs["streak"]}일째 · 큰 움직임 가능성↑ (방향 모름)</div>')
+
+
 def _row_html(r: dict) -> str:
     """표(가로 스크롤)는 모바일에서 셀마다 세로로 뭉개지는 문제가 있어서, 폭에 상관없이
     항상 읽히는 카드 하나로 바꿨다(2026-09-27, 모바일 실사용 피드백) — 좁은 화면에선 1열로
@@ -188,7 +214,7 @@ def _row_html(r: dict) -> str:
         <div class="etf-name">{html.escape(r['etf_name'])}</div>
         <div class="etf-code">{html.escape(r['etf_code'])}</div>
       </div>
-      <div class="basket-sub">{html.escape(r['basket'])} &middot; 센서 {r['n_sensors']}종목</div>
+      <div class="basket-sub">{html.escape(r['basket'])} &middot; 센서 {r['n_sensors']}종목</div>{_compression_badge(r)}
       <div class="label" title="이 ETF 자신의 내일 방향 예측(예측모델/Legacy 기준) — 구성종목 신호와는 다른 예측입니다.">ETF 자체 예측</div>
       <div class="row-val">{_etf_pred_cell(r)}</div>
       <div class="label" title="이 ETF를 구성하는 센서 종목들 중 서로 비교했을 때 가장 확신이 강한 종목 — 상대적 우열이지, 이 신호 때문에 ETF가 오른다는 뜻이 아닙니다.">구성종목 중 최고 신호</div>
@@ -234,10 +260,13 @@ TEMPLATE = r"""<!DOCTYPE html>
   .c-muted { color:#94a3b8; }
   .c-empty { color:#475569; }
   .c-warn { color:#fbbf24; }
+  .comp-badge { display:table; font-size:0.72rem; color:#fbbf24; background:rgba(251,191,36,0.1);
+                border:1px solid rgba(251,191,36,0.35); border-radius:6px; padding:2px 6px; margin:-4px 0 8px; }
   .sub { color:#64748b; font-size:0.75rem; }
   .note-inline { color:#475569; font-size:0.68rem; }
   .note-block { display:block; color:#475569; font-size:0.68rem; }
   footer.note { font-size:0.75rem; color:#475569; margin-top:16px; }
+__RANK_CSS__
 </style>
 </head>
 <body>
@@ -247,15 +276,26 @@ TEMPLATE = r"""<!DOCTYPE html>
       60% 이상 __N_SIGNAL__개). 적중률은 그 ETF를 같은 방향으로 예측했던 날의 적중률에 오늘 괴리율 효과(전체 ETF
       합산 추정)를 반영한 값이고, <b>평소</b>는 예측과 상관없이 그 방향으로 움직인 날의 비율입니다 — 적중률이 평소보다
       얼마나 높은지가 실제 예측 실력입니다. 구성종목 신호는 참고용이고, 자세한 근거는 각 ETF를 눌러 확인하세요.</p>
+    <p>__COMP_NOTE__</p>
     <p class="meta">생성 시각: __GENERATED_AT__</p>
   </header>
 
   <div class="grid">__ROWS__</div>
+__RANK_CARD__
 
   <footer class="note">자동 주문은 하지 않습니다 — 장 마감 후 계산한 참고용 방향 신호이며, 진입 여부는 사람이 판단합니다.</footer>
 </body>
 </html>
 """
+
+
+def _compression_note(rows: list[dict]) -> str:
+    n = sum(1 for r in rows if r.get("compression") and r["compression"]["compressed"])
+    st = pooled_expansion([f for f in _COMP_CACHE.values() if f is not None])
+    if st is None:
+        return ""
+    return (f'<b class="c-warn">&#9889; 응축 중 {n}개</b> — 과거 ETF에서 응축 뒤 20일 안에 변동성이 1.5배 이상 커진 비율은 '
+            f'<b>{st["comp_rate"]:.0%}</b>(평소 {st["base_rate"]:.0%})입니다. 큰 움직임이 올 가능성만 알려주고, 방향은 알려주지 않습니다.')
 
 
 def build_index() -> int:
@@ -271,6 +311,9 @@ def build_index() -> int:
                 .replace("__N_TOTAL__", str(len(rows)))
                 .replace("__N_SIGNAL__", str(n_signal))
                 .replace("__GENERATED_AT__", datetime.now(KST).strftime("%Y-%m-%d %H:%M"))
+                .replace("__COMP_NOTE__", _compression_note(rows))
+                .replace("__RANK_CARD__", rank_index_card_html(load_etf_rank()))
+                .replace("__RANK_CSS__", RANK_CSS)
                 .replace("__ROWS__", "".join(_row_html(r) for r in rows)))
     out_path = results_dir() / "index.html"
     out_path.write_text(html_out, encoding="utf-8")

@@ -148,7 +148,9 @@ python vm_spc/pipeline.py --label-mode absolute            # 비교용 구버전
 - 한계: Point-in-time 구성종목 이력이 없어 현재 구성종목으로 근사합니다(생존편향, `vm_spc/universe.py`
   의 `POINT_IN_TIME_HISTORY` 를 채우면 해소). `coint_z` 는 ETF-ex-A 대신 타겟 ETF 대비 롤링 OLS
   스프레드입니다. 둘 다 대시보드 탭의 "검증 설정 · 한계"에 표시됩니다.
-- **현재 결과(2026-09-27, 39개 ETF)**: 검증 가능한 31개 중 BASELINE 15 / REJECTED 10 / CHALLENGER 6.
+- **현재 결과(2026-09-28, 5년 데이터, 대칭 순위 라벨)**: 검증 가능한 31개 중 BASELINE 0 / REJECTED 29 / CHALLENGER 2.
+  이전의 "BASELINE 15"는 순위 라벨 비대칭(평소 비율 57%를 50%와 비교)으로 후하게 나온 것이었다(검증이력 9.9·9.10).
+  전 바스켓 합산으로는 T+1에서 52.7% vs 평소 50.0%의 약한 신호가 확인된다.
   나머지 8개는 타겟 ETF가 최근 상장돼 유효 거래일이 280일 미만이라 대기 중입니다(같은 섹터의 다른
   ETF로 커버되므로 데이터가 쌓일 때까지 기다림). 대표 예시는 `semiconductor_krx_scan`(타겟 KODEX 반도체).
 - 챔피언이 없는(REJECTED) 바스켓도 빈칸으로 두지 않고 Baseline 원값을 흐리게 "게이트 미달·참고"로
@@ -164,10 +166,38 @@ python vm_spc/pipeline.py --label-mode absolute            # 비교용 구버전
 - **구성종목 중 최고 신호** — 챔피언-챌린저가 바스켓 안 종목들끼리 비교해 가장 확신이 강한 종목.
   상대적 우열일 뿐, "이 종목 때문에 ETF가 오른다"는 뜻이 아닙니다.
 
+변동성이 응축된 ETF(20일 변동성·고저폭이 모두 자기 과거 250일 하위 20%)에는 **"⚡ 응축 중 N일째 · 큰 움직임
+가능성↑ (방향 모름)"** 배지가 붙습니다. 응축 뒤에는 20일 안에 변동성이 1.5배 이상 커지는 경우가 평소의 약 2배라는 게
+검증됐지만(ETF 27~28% vs 14~15%), 방향은 알려주지 않습니다(검증이력 9.14, `vm_predict/v2_compression.py`).
+
 외부 CDN 없이 CSS를 파일에 직접 넣어서, 텔레그램으로 받아 폰에서 열어도 그대로 보입니다. 각 카드는
 그 바스켓의 `dashboard_v2.html`로 연결됩니다(폴더 구조가 함께 있어야 하므로 폰에서는 구글 드라이브의
 `VM-SPC_Core/results`에서 여는 것을 권장). `python vm_spc/pipeline.py`(전체 바스켓, `--no-render`
 아닐 때)를 돌리면 자동으로 다시 생성됩니다. 따로 만들고 싶으면 `python vm_spc/build_index.py`.
+
+### ETF 순위(섹터 순환, 프로토타입)
+
+ETF 단위 SPC 상태(breadth·칼만·CUSUM·T²·괴리율·20일 상대수익)로 향후 1·5·10·20거래일 동안 KODEX 200보다 더 오를
+확률을 점수로 매기고, 날짜별 ETF 간 순위 상관으로 검증합니다(테마 대표 ETF 16개 기준). 현재 T+1만 통과했고 그 신호는
+대부분 괴리율 되돌림에서 옵니다. 인덱스 상단 랭킹 카드와 ETF 상세 예측 카드 아래 한 줄로 표시 — 검증이력 9.12절.
+
+```powershell
+python etf_rank/run.py          # 계산 → 검증 → 대시보드·인덱스 재생성 (v2_run.py 이후)
+python etf_rank/run.py --dry    # 검증 결과만
+```
+
+### 종목 추적(역방향, 프로토타입)
+
+ETF·지수 흐름 + 종목 통계로 각 종목이 1·5·10·20거래일 뒤 **소속 시장 지수보다 더 오를지**를 봅니다(기존 예측모델의
+반대 방향). 바스켓마다 그 ETF 기준으로 보고, 종목별 ETF 내 비중을 함께 표시합니다. 기간별로 전 바스켓을 합쳐
+검증하고, 통과한 기간만 Active(나머지는 흐리게 HOLD). 현재 4개 기간 모두 HOLD — 결과와 설계 이력은
+`VM_SPC_Core_검증이력.md` 9.6·9.7절. 아직 일일 자동 실행에는 넣지 않았습니다.
+
+```powershell
+python vm_predict/backfill_history.py      # (1회) 일봉·NAV 이력을 과거 방향으로 5년까지 확장
+python stock_track/run.py                  # 기준 지수·ETF 비중 갱신 → 계산 → 검증 → 대시보드 "종목 추적" 탭
+python stock_track/run.py --no-fetch       # API 호출 없이
+```
 
 ### PAIR-SPC: 섹터 대표종목 실증 + 공적분 SPC (신규, 선택)
 

@@ -53,12 +53,15 @@ def gate1_detail(metrics: dict) -> dict:
     표본이 애초에 판단하기엔 너무 적은 것은 서로 다른 문제다)."""
     hc = _hc(metrics)
     ci_lower = metrics.get("ci_lower")
+    # CI 하한은 동전던지기(50%)가 아니라 실제 평소 비율(OOS 라벨의 양성 비율)보다 높아야 한다 — 둘 중 큰 값.
+    # 순위 라벨 비대칭으로 평소 비율이 57%였는데 50%와 비교해 통과가 후하게 나왔던 문제 수정(검증이력 9.9).
+    ci_ref = max(CI_LOWER_MIN, metrics.get("base_rate") or 0.0)
     n_core = metrics.get("n_s_core") or 0
     point_ok = hc is not None and hc >= GATE1_THRESHOLD
-    ci_ok = ci_lower is not None and ci_lower > CI_LOWER_MIN
+    ci_ok = ci_lower is not None and ci_lower > ci_ref
     n_ok = n_core >= MIN_N_CORE
     return {"passed": point_ok and ci_ok and n_ok, "point_ok": point_ok, "ci_ok": ci_ok, "n_ok": n_ok,
-            "high_conf_precision": hc, "ci_lower": ci_lower, "n_s_core": n_core}
+            "high_conf_precision": hc, "ci_lower": ci_lower, "ci_ref": ci_ref, "n_s_core": n_core}
 
 
 def gate1_pass(metrics: dict) -> bool:
@@ -75,7 +78,7 @@ def _gate1_why(label: str, d: dict) -> str | None:
     if not d["n_ok"]:
         return f"{label} 점추정은 통과했지만 표본 {d['n_s_core']}건으로 너무 적어(기준 ≥{MIN_N_CORE}건) 판단 보류"
     ci = f"{d['ci_lower']:.0%}" if d["ci_lower"] is not None else "N/A"
-    return f"{label} 점추정은 통과했지만 표본 {d['n_s_core']}건으로 작아 CI 하한 {ci}(기준 >{CI_LOWER_MIN:.0%} 미달) — 우연일 수 있어 제외"
+    return f"{label} 점추정은 통과했지만 CI 하한 {ci}이 평소 비율 {d['ci_ref']:.0%}을 넘지 못함 — 우연일 수 있어 제외"
 
 
 def decide_champion(baseline_metrics: dict, challenger_metrics: dict) -> dict:
@@ -91,19 +94,19 @@ def decide_champion(baseline_metrics: dict, challenger_metrics: dict) -> dict:
     if not base_pass and not chal_pass:
         return {**out, "champion": "REJECTED", "branch": 1,
                 "plain_reason": "두 모델 다 아직 믿을 만한 신호를 찾지 못했습니다 — 지금은 기존 규칙만 참고하세요.",
-                "reason": (f"Baseline·Challenger 모두 Gate 1(High-Conf Precision ≥ {thr}, CI 하한 >{CI_LOWER_MIN:.0%}, n≥{MIN_N_CORE}) "
+                "reason": (f"Baseline·Challenger 모두 Gate 1(High-Conf Precision ≥ {thr}, CI 하한 > 평소 비율, n≥{MIN_N_CORE}) "
                           f"미달 — 약한 방향성 신호조차 통계적으로 확인 안 됨, Legacy 룰만 운영. " + " / ".join(notes))}
     if base_pass and not chal_pass:
         return {**out, "champion": "BASELINE", "branch": 2,
                 "plain_reason": "단순한 모델에서만 일관된 신호가 확인돼 이걸 기준으로 삼습니다 — 확실한 건 아니고 약한 참고 신호입니다.",
-                "reason": (f"Baseline 만 Gate 1(≥{thr}, CI 하한 >{CI_LOWER_MIN:.0%}, n≥{MIN_N_CORE}) 통과 — "
+                "reason": (f"Baseline 만 Gate 1(≥{thr}, CI 하한 > 평소 비율, n≥{MIN_N_CORE}) 통과 — "
                           f"약한 방향성 참고 신호로 Baseline 채택(고신뢰 확정 아님). {_gate1_why('Challenger', chal_d) or ''}")}
     if not base_pass and chal_pass:
         # Baseline이 기준 미달인데 Challenger만 통과한 예외 케이스
         # → Gate 2 취지상 비교 대상이 없으므로 Challenger 단독 채택
         return {**out, "champion": "CHALLENGER", "branch": "2b",
                 "plain_reason": "복잡한 모델에서만(비교 대상 없이) 신호가 확인돼 이걸 기준으로 삼습니다 — 확실한 건 아니고 약한 참고 신호입니다.",
-                "reason": (f"Challenger 만 Gate 1(≥{thr}, CI 하한 >{CI_LOWER_MIN:.0%}, n≥{MIN_N_CORE}) 통과(비교 대상 없음) — "
+                "reason": (f"Challenger 만 Gate 1(≥{thr}, CI 하한 > 평소 비율, n≥{MIN_N_CORE}) 통과(비교 대상 없음) — "
                           f"약한 방향성 참고 신호로 Challenger 단독 채택(고신뢰 확정 아님). {_gate1_why('Baseline', base_d) or ''}")}
 
     # 둘 다 통과 → Gate 2

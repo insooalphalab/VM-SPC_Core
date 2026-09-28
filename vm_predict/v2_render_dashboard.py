@@ -23,6 +23,8 @@ import sys
 from datetime import datetime, timedelta
 
 from v2_config import get_basket, results_dir
+from stock_track.render import track_tab_html
+from etf_rank.render import detail_line_html as rank_detail_line_html, load as load_etf_rank
 
 CHART_DISPLAY_DAYS = 365  # 그래프는 수집기간과 무관하게 항상 최근 1년치만 보여준다(표·통계는 전체기간)
 
@@ -83,6 +85,7 @@ TEMPLATE = r"""<!DOCTYPE html>
         <summary class="text-cyan-400 cursor-pointer">과거 예측이 얼마나 맞았는지 숫자로 보기</summary>
         <div class="mt-2">__CM_HTML__</div>
       </details>
+      __RANK_LINE_HTML__
     </section>
 
     <section class="card p-4">
@@ -115,6 +118,10 @@ TEMPLATE = r"""<!DOCTYPE html>
     __CHAMP_TAB_CONTENT__
   </div>
 
+  <div id="tab-content-track" class="hidden">
+    __TRACK_TAB_CONTENT__
+  </div>
+
   <p class="text-xs text-slate-600 mt-4">V1(5대시그널 스코어카드)의 칼만필터·신호 계산을 그대로 이어받아 실제로 쓰는 도구입니다.
     반도체 FAB 공정관리(FDC)의 SPC 관리도(CUSUM·Hotelling's T&sup2;) 기법에서 착안해 설계했습니다.</p>
 
@@ -124,7 +131,7 @@ TEMPLATE = r"""<!DOCTYPE html>
 
     // ── 탭 전환 (예측모델 / 대표종목 상관관계 / 챔피언-챌린저) ───────────────
     // 숨겨진 div 안에서는 차트 크기를 못 재므로, 각 탭 차트는 처음 열 때 한 번만 그린다.
-    const TABS = ['vm', 'pair', 'champ'];
+    const TABS = ['vm', 'pair', 'champ', 'track'];
     const tabRendered = { vm: true };
     const tabRenderers = { pair: () => renderPairTab(), champ: () => renderChampTab() };
     function showTab(name) {
@@ -541,7 +548,9 @@ def _tab_buttons_html(payload: dict) -> str:
     if payload.get("pair"):
         tabs.append(("pair", "대표종목 상관관계 (PAIR-SPC)"))
     if payload.get("vm_spc"):
-        tabs.append(("champ", "챔피언-챌린저 (VM-SPC Core)"))
+        tabs.append(("champ", "챔피언-챌린저 (참고)"))
+    if payload.get("stock_track"):
+        tabs.append(("track", "종목 추적 (참고)"))
     if len(tabs) == 1:
         return ""
     buttons = "".join(
@@ -972,7 +981,7 @@ def _champ_summary_html(payload: dict) -> str:
     tiles = (tile("legacy", "기존 규칙", "Legacy") + tile("baseline", "단순 모델", "Ridge")
             + tile("challenger", "복잡한 모델", "LightGBM"))
 
-    return f"""
+    block = f"""
     <div class="rounded-lg border {_CHAMP_BANNER_CLS[champ]} p-3 mt-3">
       <div class="text-xs text-slate-400">{headline_label}</div>
       <div class="text-xl font-bold mt-0.5">{headline}</div>
@@ -992,6 +1001,15 @@ def _champ_summary_html(payload: dict) -> str:
         전체 종목 방향 예측 보기 &rarr;
       </button>
     </div>"""
+    if champ != "REJECTED":
+        return block
+    # 검증을 통과한 모델이 없으면 첫 화면을 차지하지 않게 한 줄로 접는다(2026-09-28 화면 정리 — 대칭 라벨 수정 후
+    # 31개 중 29개가 REJECTED 라, 큰 "오늘의 신호" 배너가 대부분 의미 없는 값을 가장 먼저 보여주고 있었다).
+    return f"""
+    <details class="mt-3 text-xs text-slate-500">
+      <summary class="cursor-pointer hover:text-slate-400">구성종목 방향 신호 — 검증을 통과한 모델 없음 (참고치 펼치기)</summary>
+      {block}
+    </details>"""
 
 
 def _champ_tab_content_html(payload: dict) -> str:
@@ -1005,7 +1023,6 @@ def _champ_tab_content_html(payload: dict) -> str:
     g1b, g1c = d["gate1"]["baseline"], d["gate1"]["challenger"]
     g2 = d.get("gate2")
     thr = f"{cfg['gate1'] * 100:.0f}%"
-    ci_min = f"{cfg.get('gate1_ci_lower_min', 0.5) * 100:.0f}%"
     gate2_text = (f"Gate 2 — Challenger&minus;Baseline {g2['margin'] * 100:+.1f}%p (기준 +{cfg['gate2_margin'] * 100:.0f}%p), "
                   f"CI 하한 {_pct(g2['ci_lower'])} {'&gt;' if g2['ci_ok'] else '&le;'} Baseline {_pct(m['baseline']['high_conf_precision'])}"
                   if g2 else "Gate 2 — 둘 다 Gate 1 을 통과해야 진행 (이번엔 해당 없음)")
@@ -1015,7 +1032,8 @@ def _champ_tab_content_html(payload: dict) -> str:
         hcp = _pct(g1["high_conf_precision"])
         ci = _pct(g1["ci_lower"])
         n_cls = "" if g1.get("n_ok", True) else " text-red-300"
-        return (f"Gate 1 · {label} {hcp}(기준 &ge;{thr}) · CI 하한 {ci}(기준 &gt;{ci_min}) "
+        ref = _pct(g1.get("ci_ref", cfg.get("gate1_ci_lower_min", 0.5)))
+        return (f"Gate 1 · {label} {hcp}(기준 &ge;{thr}) · CI 하한 {ci}(기준 &gt; 평소 {ref}) "
                 f"· <span class='{n_cls}'>n={g1['n_s_core']}(기준 &ge;{min_n})</span>")
 
     branch_desc = f"""
@@ -1027,8 +1045,8 @@ def _champ_tab_content_html(payload: dict) -> str:
           {_gate_chip(g2['passed'] if g2 else None, gate2_text)}
         </div>
         <p class="mt-3 pl-1 text-slate-500">기준(Gate 1) 은 점추정만 보지 않습니다 — 표본이 작으면 우연히 높게 나온 값도
-          점추정 기준은 넘을 수 있어서, 통계적 신뢰구간(CI) 하한이 동전던지기(50%)보다 확실히 높고 표본도
-          충분해야만 통과로 칩니다.</p>
+          점추정 기준은 넘을 수 있어서, 통계적 신뢰구간(CI) 하한이 평소 비율(이 기간 라벨이 1이었던 비율, 최소 50%)보다
+          확실히 높고 표본도 충분해야만 통과로 칩니다.</p>
         <ol class="list-decimal pl-8 mt-1 space-y-0.5 text-slate-500">
           <li>단순·복잡한 모델 둘 다 기준 미달 &rarr; <b>최종 기각</b>, 참고 신호도 비활성화, 기존 규칙만 운영</li>
           <li>단순 모델만 기준 통과 &rarr; <b>단순 모델 채택</b>(참고용 신호) — 복잡한 모델만 통과한 예외 시 복잡한 모델 단독 채택</li>
@@ -1203,6 +1221,7 @@ def render(payload: dict) -> str:
 
     start_date = _unified_start_date(payload)
     view = dict(payload)  # 차트·하이라이트·해석문은 통일된 구간(view)만 본다. confusion_matrix는 원본 전체.
+    view.pop("stock_track", None)  # 서버에서 HTML로 다 그리므로 JS 데이터에는 안 넣는다
     view["target_series"] = _trim_series(payload["target_series"], start_date)
     view["breadth_series"] = _trim_series(payload["breadth_series"], start_date)
     view["t2_series"] = _trim_series(payload["t2_series"], start_date)
@@ -1241,6 +1260,8 @@ def render(payload: dict) -> str:
     html = html.replace("__TAB_BUTTONS_HTML__", _tab_buttons_html(payload))
     html = html.replace("__PAIR_TAB_CONTENT__", _pair_tab_content_html(payload))
     html = html.replace("__CHAMP_TAB_CONTENT__", _champ_tab_content_html(payload))
+    html = html.replace("__TRACK_TAB_CONTENT__", track_tab_html(payload.get("stock_track")))
+    html = html.replace("__RANK_LINE_HTML__", rank_detail_line_html(load_etf_rank(), b["target"]["code"]))
     html = html.replace("__CM_HTML__", _cm_html(payload["confusion_matrix"]))
     html = html.replace("__INTERP_TARGET__", _interp_target(view))
     html = html.replace("__INTERP_BREADTH__", _interp_breadth(view))
@@ -1290,6 +1311,10 @@ def render_basket(basket: dict) -> int:
         payload["vm_spc"] = json.loads(champ_path.read_text(encoding="utf-8"))
 
     payload["etf_extras"] = validated_etf_extras(basket["name"])
+
+    track_file = results_dir() / basket["name"] / "stock_track" / "stock_track.json"
+    if track_file.exists():
+        payload["stock_track"] = json.loads(track_file.read_text(encoding="utf-8"))
 
     out = results_dir() / basket["name"] / "dashboard_v2.html"
     out.write_text(render(payload), encoding="utf-8")

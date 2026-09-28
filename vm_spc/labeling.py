@@ -72,13 +72,26 @@ def attach_relative_labels(feature_frame: pd.DataFrame, top_frac: float = TOP_FR
     같은 크기의 약한 신호를 훨씬 좁은 신뢰구간으로 검출한다는 게 실익이다."""
     df = feature_frame.copy()
     df["next_ret"] = next_day_returns(df)
-    df = df.dropna(subset=["next_ret"]).copy()
-    active = df.groupby("date")["ticker_id"].transform("count")
-    df = df[active >= min_active].copy()
-    pct_rank = df.groupby("date")["next_ret"].rank(pct=True, method="average")
+    return rank_labels(df, "next_ret", top_frac, bot_frac, min_active)
+
+
+def rank_labels(df: pd.DataFrame, ret_col: str, top_frac: float = TOP_FRAC, bot_frac: float = BOT_FRAC,
+                min_active: int = MIN_ACTIVE) -> pd.DataFrame:
+    """날짜별 ret_col 순위로 상위 floor(n·top_frac)개 → 1, 하위 floor(n·bot_frac)개 → 0, 나머지 제외.
+
+    2026-09-28 수정: 이전엔 백분위 순위(1/n..1)에 `≥ 1-top_frac → 1`, `≤ bot_frac → 0`을 적용해 경계에서 위쪽이
+    한 칸 더 들어갔다(10종목 5:4 → 양성 56%, 5~7종목 3:2 → 60%). 그래서 평소 비율이 50%가 아니라 약 57%였고
+    "50% 대비" 비교가 후하게 나왔다(검증이력 9.9). 개수로 잘라 위·아래를 같은 수로 맞춘다."""
+    df = df.dropna(subset=[ret_col]).copy()
+    n = df.groupby("date")["ticker_id"].transform("count")
+    df = df[n >= min_active].copy()
+    n = df.groupby("date")["ticker_id"].transform("count")
+    order = df.groupby("date")[ret_col].rank(method="first")          # 1 = 가장 낮은 수익률
+    n_top = np.maximum(np.floor(n * top_frac), 1)
+    n_bot = np.maximum(np.floor(n * bot_frac), 1)
     y = pd.Series(np.nan, index=df.index)
-    y[pct_rank >= (1 - top_frac)] = 1.0
-    y[pct_rank <= bot_frac] = 0.0
+    y[order > n - n_top] = 1.0
+    y[order <= n_bot] = 0.0
     df["y"] = y
     df = df.dropna(subset=["y"]).copy()
     df["y"] = df["y"].astype(int)
