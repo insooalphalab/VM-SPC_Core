@@ -117,6 +117,26 @@ def basket_codes(basket: dict) -> dict[str, str]:
     return out
 
 
+def sensor_universe() -> dict[str, str]:
+    """전 바스켓 센서 종목 {코드: 이름}(중복 제거) — DART·수급·박스 검증의 공통 대상."""
+    out: dict[str, str] = {}
+    for b in load_baskets():
+        for s in b["sensors"]:
+            out.setdefault(s["code"], s["name"])
+    return out
+
+
+LONG_HISTORY = "_long_history"     # 검증용 장기 일봉 data/_long_history/{코드}.csv (운영 5년 데이터와 분리)
+MARKET_CLOSE_DONE = (15, 40)       # 이 시각 전에는 오늘 봉·수급이 미완성
+
+
+def last_complete_day():
+    """확정된 마지막 날짜(장 마감 전이면 어제) — 수집기가 미완성 오늘 값을 저장하지 않게."""
+    from datetime import datetime
+    now = datetime.now(KST)
+    return now.date() if (now.hour, now.minute) >= MARKET_CLOSE_DONE else now.date() - timedelta(days=1)
+
+
 @dataclass(frozen=True)
 class Params:
     # ── 칼만필터 (V1과 동일한 원칙: 잡음 분산 = 워밍업 구간 일차차분 분산의 비율) ──

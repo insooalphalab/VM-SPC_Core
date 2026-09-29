@@ -33,7 +33,7 @@ from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 
-from kis_client import RateLimitedCaller, fetch_daily_bars
+from kis_client import RateLimitedCaller, fetch_daily_bars, to_float
 from v2_config import KST, ROOT, state_dir
 from v2_kospi_master import load_etf_universe
 
@@ -62,13 +62,6 @@ SECTOR_BLACKLIST_DEFAULT = {
 OUT_PATH = ROOT / "basket_watchlist.scanned.json"
 
 
-def _to_float(s) -> float | None:
-    try:
-        return float(str(s).replace(",", ""))
-    except (TypeError, ValueError):
-        return None
-
-
 def _sanitize(name: str) -> str:
     return re.sub(r'[\\/:*?"<>|]', "", name).strip()
 
@@ -92,11 +85,11 @@ def build_meta_table(universe: pd.DataFrame, limit: int | None = None) -> pd.Dat
             continue
         if not out:
             continue
-        vol, price = _to_float(out.get("acml_vol")), _to_float(out.get("stck_prpr"))
+        vol, price = to_float(out.get("acml_vol")), to_float(out.get("stck_prpr"))
         rows.append({
             "code": row.code, "name": row.name,
-            "mltp": _to_float(out.get("etf_trc_ert_mltp")),
-            "aum": _to_float(out.get("etf_ntas_ttam")),
+            "mltp": to_float(out.get("etf_trc_ert_mltp")),
+            "aum": to_float(out.get("etf_ntas_ttam")),
             "sector": (out.get("etf_rprs_bstp_kor_isnm") or "").strip(),
             "div_name": (out.get("etf_div_name") or "").strip(),
             # 당일 거래대금(대략치) — top-volume 1차 필터용. 정밀 유동성 판단은 add_liquidity()의
@@ -183,9 +176,9 @@ def fetch_top_holdings(caller: RateLimitedCaller, code: str, top_n: int) -> list
         c = str(r.get("stck_shrn_iscd") or "").strip()
         if not re.fullmatch(r"\d{6}", c):
             continue
-        w = _to_float(r.get("etf_cnfg_issu_rlim"))
+        w = to_float(r.get("etf_cnfg_issu_rlim"))
         if w is None:
-            w = _to_float(r.get("etf_vltn_amt"))
+            w = to_float(r.get("etf_vltn_amt"))
         if w is None:
             continue
         rows.append({"code": c, "name": (r.get("hts_kor_isnm") or "").strip(), "w": w})

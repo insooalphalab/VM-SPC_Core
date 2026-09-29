@@ -31,10 +31,16 @@ ADJUST_TOL = 0.005            # 겹치는 날짜 종가가 기존 값과 이 비
 
 def _adjusted_since(existing, rows: list[dict]) -> bool:
     """액면분할·무상증자 등으로 KIS 수정주가가 과거 전체에 소급 조정됐는지 — 최근 구간만 덮어쓰면
-    조정 전/후 가격이 섞여 시계열이 끊기므로, 겹치는 날짜의 종가를 비교해 감지한다."""
+    조정 전/후 가격이 섞여 시계열이 끊기므로, 겹치는 날짜의 종가를 비교해 감지한다.
+
+    저장된 마지막 날짜는 비교에서 뺀다 — 16:30 실행은 시간외 단일가(16:00~18:00) 중이라 그날 봉 종가에 시간외 가격이
+    섞여 저장되고, 다음 날 정식 종가로 바뀐다(2026-09-29 확인: 16:3x 저장값과 16:45 값이 35종목 중 21개 달랐음).
+    이 차이를 소급 조정으로 오인해 매일 수십 종목을 5년치 재수집하던 원인. 마지막 날짜 값은 증분 병합이 새 값으로 덮어쓰고,
+    진짜 소급 조정(액면분할 등)은 과거 전체가 바뀌므로 나머지 겹치는 날짜로 잡힌다."""
+    last = existing.index.max()
     for r in rows:
         ts = datetime.strptime(r["date"], "%Y%m%d")
-        if ts in existing.index:
+        if ts in existing.index and ts != last:
             old = existing.at[ts, "close"]
             if old > 0 and abs(r["close"] - old) / old > ADJUST_TOL:
                 # 2026-09-28 정기 실행에서 67종목이 한꺼번에 감지돼 원인 추적용으로 남긴다(날짜·이전값·새값)

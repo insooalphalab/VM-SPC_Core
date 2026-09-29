@@ -3,28 +3,29 @@
 운영 도구들이 쓰는 data/{바스켓}/ (5년)은 건드리지 않고 data/_long_history/{코드}.csv 에 따로 저장한다.
 대상: 전 바스켓의 고유 타겟 ETF + KODEX 200(기준 지수).
 
-  python vm_predict/fetch_long_history.py            # 2005-01-01 부터
+  python research/fetch_long_history.py            # 2005-01-01 부터
 """
 from __future__ import annotations
 
 import sys as _sys
 from pathlib import Path as _Path
 _ROOT = _Path(__file__).resolve().parent.parent
-for _p in (_ROOT, _ROOT / "core", _ROOT / "vm_predict", _ROOT / "pair_spc"):
+for _p in (_ROOT, _ROOT / "core", _ROOT / "vm_predict", _ROOT / "pair_spc", _ROOT / "dart_events",
+           _ROOT / "stock_track", _ROOT / "scenario", _ROOT / "research"):
     if str(_p) not in _sys.path:
         _sys.path.insert(0, str(_p))
 
 import logging
 import sys
 import time
-from datetime import date, datetime
+from datetime import date
 
 from kis_client import RateLimitedCaller, fetch_daily_bars
-from v2_config import KST, load_baskets
+from v2_config import LONG_HISTORY, last_complete_day, load_baskets
 from v2_datastore import save_bars
 
 log = logging.getLogger("fetch_long_history")
-LONG_BASKET = "_long_history"
+LONG_BASKET = LONG_HISTORY
 START = date(2005, 1, 1)
 
 
@@ -35,7 +36,7 @@ def main() -> int:
     for b in load_baskets():
         codes.setdefault(b["target"]["code"], b["target"]["name"])
     caller, t0, failed = RateLimitedCaller(), time.time(), []
-    today = datetime.now(KST).date()
+    today = last_complete_day()                     # 장 마감 전이면 어제까지
     for code, name in codes.items():
         try:
             rows = fetch_daily_bars(caller, code, START, today)

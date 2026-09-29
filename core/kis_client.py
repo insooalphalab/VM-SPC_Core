@@ -84,7 +84,8 @@ def _ymd(d: date) -> str:
     return d.strftime("%Y%m%d")
 
 
-def _to_float(s) -> float | None:
+def to_float(s) -> float | None:
+    """"1,234" 같은 API 문자열 → float, 빈 값·"-"·잘못된 값은 None."""
     try:
         return float(str(s).replace(",", ""))
     except (TypeError, ValueError):
@@ -108,7 +109,7 @@ def fetch_daily_bars(caller: RateLimitedCaller, code: str, start: date, end: dat
         got = 0
         for r in body.get("output2") or []:
             d = r.get("stck_bsop_date")
-            o, h, l, c, v = (_to_float(r.get(k)) for k in
+            o, h, l, c, v = (to_float(r.get(k)) for k in
                              ("stck_oprc", "stck_hgpr", "stck_lwpr", "stck_clpr", "acml_vol"))
             if not d or None in (o, h, l, c, v):
                 continue
@@ -135,7 +136,7 @@ def fetch_nav_daily(caller: RateLimitedCaller, code: str, start: date, end: date
         got = 0
         for r in body.get("output") or []:
             d = r.get("stck_bsop_date")
-            nav, close, dprt = (_to_float(r.get(k)) for k in ("nav", "stck_clpr", "dprt"))
+            nav, close, dprt = (to_float(r.get(k)) for k in ("nav", "stck_clpr", "dprt"))
             if not d or None in (nav, close, dprt) or nav <= 0:
                 continue
             rows[d] = {"date": d, "nav": nav, "close": close, "dprt": dprt}
@@ -149,7 +150,7 @@ def fetch_nav_daily(caller: RateLimitedCaller, code: str, start: date, end: date
 def fetch_etf_listed_shares(caller: RateLimitedCaller, code: str) -> float | None:
     """ETF 현재 상장좌수(설정·환매로 변함). 과거 이력 API 가 없어 매일 스냅샷으로 쌓는다."""
     body = caller.get(ETF_PRICE_PATH, ETF_PRICE_TR, {"fid_cond_mrkt_div_code": "J", "fid_input_iscd": code})
-    return _to_float((body.get("output") or {}).get("lstn_stcn"))
+    return to_float((body.get("output") or {}).get("lstn_stcn"))
 
 
 def fetch_stock_name(caller: RateLimitedCaller, code: str) -> str:

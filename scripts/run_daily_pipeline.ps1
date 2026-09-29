@@ -5,7 +5,10 @@
 # vm_predict/v2_run.py 를 먼저 돌려야 한다. 순서:
 #   1) vm_predict/v2_run.py   — Stage1(일봉 수집) → Stage2(Legacy/CUSUM/T²) → Stage3(VM 탭 렌더링)
 #   2) pair_spc/run_pair_spc.py — 대표종목 실증 + 공적분 SPC → PAIR-SPC 탭 렌더링
+#   2.5) dart_events/collect.py --recent — DART 최근 2년 재무·공시 + 바스켓 PER/PBR 상태(인덱스 카드용)
+#   2.7) reports/run.py — 텔레그램 리포트 요약 새 글 → 섹터 리포트 흐름(배경 자료, 인덱스 맨 아래)
 #   3) vm_spc/pipeline.py     — 챔피언-챌린저 Walk-Forward 재검증 → 탭 렌더링 → results/index.html 자동 갱신
+#   3.5) scenario/render_risk.py — 박스권 손절·수량 페이지(scenario_targets.json 종목, 수급 증분 갱신)
 #   4) results/ → 구글 드라이브 동기화 폴더로 미러링(robocopy /MIR) — 폰에서 구글 드라이브 앱으로
 #      상세 대시보드까지 열람 가능하게. index.html 의 링크는 상대경로라 results/ 폴더 구조가 통째로
 #      옆에 있어야 클릭이 된다(단, 드라이브 모바일 앱이 그 상대링크 이동을 보장하진 않는다 — 그래도
@@ -85,9 +88,15 @@ $env:PYTHONIOENCODING = "utf-8"
 
 $rc1 = Run-Step "STAGE1-3 vm_predict (forecast model)"    "vm_predict\v2_run.py"
 $rc2 = Run-Step "PAIR-SPC (representative stock corr.)"   "pair_spc\run_pair_spc.py"
+# DART 재무·공시(최근 2년) + 바스켓 PER/PBR 상태 — 인덱스 카드가 읽으므로 vm_spc(인덱스 생성)보다 먼저.
+$rcD = Run-Step "DART financials + valuation"             "dart_events\collect.py" @("--recent")
+# 리포트 요약(텔레그램 공개 채널) 새 글 → 섹터 리포트 흐름(배경 자료) — 인덱스 맨 아래 접힌 한 줄이 이 요약을 읽으므로 인덱스보다 먼저.
+$rcR = Run-Step "analyst reports (reference)"             "reports\run.py"
 $rc3 = Run-Step "vm_spc champion-challenger + index"       "vm_spc\pipeline.py"
+# 박스권 손절·수량 페이지(scenario_targets.json 종목, 수급 증분 갱신 포함) — 드라이브 동기화 전에 만들어 폰에서도 최신본
+$rcS = Run-Step "scenario risk page"                      "scenario\render_risk.py"
 
-Write-Utf8Line "`nALL DONE: vm_predict=$rc1 pair_spc=$rc2 vm_spc=$rc3"
+Write-Utf8Line "`nALL DONE: vm_predict=$rc1 pair_spc=$rc2 dart=$rcD reports=$rcR vm_spc=$rc3 scenario=$rcS"
 
 # 구글 드라이브 동기화 폴더(G:\내 드라이브, Drive for Desktop)로 results/ 를 통째로 미러링.
 # robocopy /MIR 는 소스에 없는 파일은 대상에서도 지워서 완전히 최신 상태로 맞춘다. G: 드라이브가
@@ -100,6 +109,8 @@ if (Test-Path "G:\") {
     $rcSync = $LASTEXITCODE   # robocopy: 0-7 = 성공(변경 종류별 코드), 8 이상 = 실패
     # basket_watchlist.json 은 .gitignore 대상이라(깃허브에 올리지 않음) 드라이브가 유일한 백업이다.
     Copy-Item (Join-Path $root "basket_watchlist.json") (Join-Path $driveRoot "basket_watchlist.json") -Force -ErrorAction SilentlyContinue
+    # scenario_targets.json(박스권 페이지 대상 종목)도 같은 이유로 드라이브에만 백업
+    Copy-Item (Join-Path $root "scenario_targets.json") (Join-Path $driveRoot "scenario_targets.json") -Force -ErrorAction SilentlyContinue
     Write-Utf8Line "===== [Google Drive 동기화] END (robocopy exit=$rcSync) $(Get-Date -Format o) ====="
 } else {
     Write-Utf8Line "`n===== [Google Drive 동기화] SKIP — G: 드라이브 연결 안 됨 $(Get-Date -Format o) ====="
@@ -107,7 +118,7 @@ if (Test-Path "G:\") {
 
 # 앞 3단계 중 하나라도 실패했으면 텔레그램 메시지 맨 위에 경고를 붙인다(그래도 전송은 한다 —
 # 뭐가 됐는지 안 된 건지 아는 게 아무 소식 없는 것보다 낫다).
-$runStatus = if (($rc1 -eq 0) -and ($rc2 -eq 0) -and ($rc3 -eq 0)) { "ok" } else { "warn" }
+$runStatus = if (($rc1 -eq 0) -and ($rc2 -eq 0) -and ($rcD -eq 0) -and ($rcR -eq 0) -and ($rc3 -eq 0) -and ($rcS -eq 0)) { "ok" } else { "warn" }
 $rc4 = Run-Step "notify_telegram" "vm_spc\notify_telegram.py" @("--run-status", $runStatus)
 
 # 로그 30일 이상 지난 건 정리

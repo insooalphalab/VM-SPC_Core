@@ -7,6 +7,8 @@
 basket_watchlist.json
 # v2_etf_scanner.py 가 생성하는 후보 목록(검토 후 basket_watchlist.json 에 직접 반영)
 basket_watchlist.scanned.json
+# 박스권 손절·수량 페이지 대상 종목 (예시 파일: scenario_targets.example.json)
+scenario_targets.json
 
 # ── 자동 생성물: 일봉·토큰 캐시·종목마스터·연산 결과·대시보드는 전부 data/·state/·results/ 아래 ───
 data/

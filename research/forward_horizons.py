@@ -6,14 +6,15 @@
 게이트는 stock_track.validation.pooled_gate(기간 단위 합산, 1/바스켓 수 가중, 블록 부트스트랩)를 그대로 쓴다.
 운영(T+1) 결과는 건드리지 않고 results/forward_horizons_validation.json 에 검증 결과만 쓴다.
 
-  python vm_spc/forward_horizons.py      # vm_predict/v2_run.py 가 5년 데이터로 먼저 돌아 있어야 한다(A)
+  python research/forward_horizons.py      # vm_predict/v2_run.py 가 5년 데이터로 먼저 돌아 있어야 한다(A)
 """
 from __future__ import annotations
 
 import sys as _sys
 from pathlib import Path as _Path
 _ROOT = _Path(__file__).resolve().parent.parent
-for _p in (_ROOT, _ROOT / "core", _ROOT / "vm_predict", _ROOT / "pair_spc"):
+for _p in (_ROOT, _ROOT / "core", _ROOT / "vm_predict", _ROOT / "pair_spc", _ROOT / "dart_events",
+           _ROOT / "stock_track", _ROOT / "scenario", _ROOT / "research"):
     if str(_p) not in _sys.path:
         _sys.path.insert(0, str(_p))
 
@@ -24,7 +25,6 @@ import sys
 import time
 from datetime import datetime
 
-import numpy as np
 import pandas as pd
 
 from v2_config import KST, Params, load_baskets, results_dir

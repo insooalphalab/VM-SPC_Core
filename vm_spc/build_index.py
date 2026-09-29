@@ -22,7 +22,7 @@ from __future__ import annotations
 import sys as _sys
 from pathlib import Path as _Path
 _ROOT = _Path(__file__).resolve().parent.parent
-for _p in (_ROOT, _ROOT / "core", _ROOT / "vm_predict", _ROOT / "pair_spc"):
+for _p in (_ROOT, _ROOT / "core", _ROOT / "vm_predict", _ROOT / "pair_spc", _ROOT / "dart_events"):
     if str(_p) not in _sys.path:
         _sys.path.insert(0, str(_p))
 
@@ -37,7 +37,7 @@ import pandas as pd
 from v2_compression import compression_frame, current_state, pooled_expansion
 from v2_datastore import load_bars
 from v2_render_dashboard import validated_etf_extras
-from etf_rank.render import INDEX_CSS as RANK_CSS, index_card_html as rank_index_card_html, load as load_etf_rank
+from dart_events.valuation import load_state as load_valuation
 
 log = logging.getLogger("vm_spc.build_index")
 
@@ -112,8 +112,13 @@ def _compression(basket: dict) -> pd.DataFrame | None:
     return _COMP_CACHE[code]
 
 
+def _load_report_summary() -> dict:
+    p = results_dir() / "reports" / "sector_summary.json"
+    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+
+
 def collect_rows() -> list[dict]:
-    rows = []
+    rows, valuation, reports = [], load_valuation(), _load_report_summary()
     for basket in load_baskets():
         name = basket["name"]
         bdir = results_dir() / name
@@ -129,6 +134,10 @@ def collect_rows() -> list[dict]:
             "etf_pred": _etf_prediction(summary, validated_etf_extras(name)),
             "champion": None, "top": None, "top_p": None, "top_validated": False, "gap": -1.0,
         }
+        row["valuation"] = valuation.get(name)
+        secs = reports.get("sectors") or {}
+        rs = secs.get(name) or next((v for v in secs.values() if v.get("etf_code") == target["code"]), None)   # 같은 타겟 ETF면 같은 섹터 값
+        row["reports"] = {**rs, "updated": reports.get("updated")} if rs else None
         cf = _compression(basket)
         row["compression"] = current_state(cf) if cf is not None else None
         vm = _load_json(bdir / "vm_spc" / "vm_spc_dashboard_data.json")
@@ -195,6 +204,41 @@ def _compression_badge(r: dict) -> str:
             f'평소보다 높지만 방향은 알려주지 않습니다">&#9889; 응축 중 {cs["streak"]}일째 · 큰 움직임 가능성↑ (방향 모름)</div>')
 
 
+def _pct_word(p: float | None) -> str:
+    if p is None:
+        return ""
+    word = "낮은 편" if p <= 0.2 else "높은 편" if p >= 0.8 else "중간"
+    return f" (5년 중 {word} {p:.0%})"
+
+
+def _valuation_line(r: dict) -> str:
+    """예측이 아니라 상태 정보 — 자기 5년 범위에서 지금 위치(검증이력 9.17 C). 흐린 색 한 줄."""
+    v = r.get("valuation")
+    if not v:
+        return ""
+    per = f"PER {v['per']:.1f}배{_pct_word(v['per_pct'])}" if v["per"] is not None else "PER 적자"
+    pbr = f"PBR {v['pbr']:.2f}배{_pct_word(v['pbr_pct'])}" if v["pbr"] is not None else ""
+    return (f'<div class="valuation" title="바스켓 합산(시가총액 ÷ 최근 4분기 순이익·자본총계, DART 공시 기준). '
+            f'5년 중 위치는 자기 과거 대비 비싼지 싼지만 보여 주며, 방향 예측이 아닙니다.">'
+            f'{per}{" &middot; " if pbr else ""}{pbr}</div>')
+
+
+def _reports_line(r: dict) -> str:
+    """섹터 리포트 흐름(20거래일 누적, 검증이력 9.25) — 카드 안 흐린 한 줄, 업데이트 날짜 함께. 테마 대표 바스켓만."""
+    v = r.get("reports")
+    if not v:
+        return ""
+    upd = (v.get("updated") or "")[5:].replace("-", "/")
+    if v["net"] is None:
+        body = f"리포트 {v['n']}건(적음)"
+    else:
+        cls = "c-up" if v["net"] > 0 else "c-down" if v["net"] < 0 else ""
+        spread = {"up": " · 상향 확산", "down": " · 하향 확산"}.get(v["spread"], "")
+        body = f'애널리스트 순상향 <span class="{cls}">{v["net"]:+.0%}</span>{spread} ({v["n"]}건)'
+    return (f'<div class="valuation" title="최근 20거래일 증권사 리포트 목표가 (상향 − 하향) ÷ 리포트 수. 천천히 바뀌는 배경 정보 '
+            f'(검증이력 9.25).">{body} <span class="upd">{upd} 업데이트</span></div>')
+
+
 def _row_html(r: dict) -> str:
     """표(가로 스크롤)는 모바일에서 셀마다 세로로 뭉개지는 문제가 있어서, 폭에 상관없이
     항상 읽히는 카드 하나로 바꿨다(2026-09-27, 모바일 실사용 피드백) — 좁은 화면에선 1열로
@@ -214,7 +258,7 @@ def _row_html(r: dict) -> str:
         <div class="etf-name">{html.escape(r['etf_name'])}</div>
         <div class="etf-code">{html.escape(r['etf_code'])}</div>
       </div>
-      <div class="basket-sub">{html.escape(r['basket'])} &middot; 센서 {r['n_sensors']}종목</div>{_compression_badge(r)}
+      <div class="basket-sub">{html.escape(r['basket'])} &middot; 센서 {r['n_sensors']}종목</div>{_valuation_line(r)}{_reports_line(r)}{_compression_badge(r)}
       <div class="label" title="이 ETF 자신의 내일 방향 예측(예측모델/Legacy 기준) — 구성종목 신호와는 다른 예측입니다.">ETF 자체 예측</div>
       <div class="row-val">{_etf_pred_cell(r)}</div>
       <div class="label" title="이 ETF를 구성하는 센서 종목들 중 서로 비교했을 때 가장 확신이 강한 종목 — 상대적 우열이지, 이 신호 때문에 ETF가 오른다는 뜻이 아닙니다.">구성종목 중 최고 신호</div>
@@ -260,8 +304,13 @@ TEMPLATE = r"""<!DOCTYPE html>
   .c-muted { color:#94a3b8; }
   .c-empty { color:#475569; }
   .c-warn { color:#fbbf24; }
+  .scn-link { color:#67e8f9; font-weight:600; }
+  p.ref { margin-top:16px; font-size:0.75rem; color:#94a3b8; line-height:1.6; }
+  p.ref .ref-date { color:#64748b; }
+  .valuation .upd { color:#475569; font-size:0.66rem; } p.ref a { color:#94a3b8; text-decoration:underline; }
   .comp-badge { display:table; font-size:0.72rem; color:#fbbf24; background:rgba(251,191,36,0.1);
                 border:1px solid rgba(251,191,36,0.35); border-radius:6px; padding:2px 6px; margin:-4px 0 8px; }
+  .valuation { font-size:0.72rem; color:#94a3b8; margin:-6px 0 10px; }
   .sub { color:#64748b; font-size:0.75rem; }
   .note-inline { color:#475569; font-size:0.68rem; }
   .note-block { display:block; color:#475569; font-size:0.68rem; }
@@ -277,6 +326,7 @@ __RANK_CSS__
       합산 추정)를 반영한 값이고, <b>평소</b>는 예측과 상관없이 그 방향으로 움직인 날의 비율입니다 — 적중률이 평소보다
       얼마나 높은지가 실제 예측 실력입니다. 구성종목 신호는 참고용이고, 자세한 근거는 각 ETF를 눌러 확인하세요.</p>
     <p>__COMP_NOTE__</p>
+    <p><a class="scn-link" href="scenario/risk_scenarios.html">&#128208; 박스권 손절·수량 가이드 (관심 종목) &rarr;</a></p>
     <p class="meta">생성 시각: __GENERATED_AT__</p>
   </header>
 
@@ -287,6 +337,18 @@ __RANK_CARD__
 </body>
 </html>
 """
+
+
+def _reference_section() -> str:
+    """천천히 바뀌는 배경 자료(20거래일 누적 흐름) — 몇 주 동안 같은 내용이 메인 자리를 차지하지 않게 맨 아래 참고 한 줄로,
+    언제 날짜 기준인지 함께 표시한다(검증이력 9.25)."""
+    p = results_dir() / "reports" / "sector_summary.json"
+    if not p.exists():
+        return ""
+    s = json.loads(p.read_text(encoding="utf-8"))
+    upd = s.get("updated", s["to"])
+    return (f'<p class="ref">참고 · 섹터 리포트 흐름 전체 <span class="ref-date">({upd[5:].replace("-", "/")} 업데이트, 20거래일 누적 — '
+            f'섹터별 값은 각 카드에)</span> <a href="reports/sector_reports.html">보기 &rarr;</a></p>')
 
 
 def _compression_note(rows: list[dict]) -> str:
@@ -312,8 +374,8 @@ def build_index() -> int:
                 .replace("__N_SIGNAL__", str(n_signal))
                 .replace("__GENERATED_AT__", datetime.now(KST).strftime("%Y-%m-%d %H:%M"))
                 .replace("__COMP_NOTE__", _compression_note(rows))
-                .replace("__RANK_CARD__", rank_index_card_html(load_etf_rank()))
-                .replace("__RANK_CSS__", RANK_CSS)
+                .replace("__RANK_CARD__", _reference_section())   # 천천히 바뀌는 배경 자료는 맨 아래 접어서만
+                .replace("__RANK_CSS__", "")
                 .replace("__ROWS__", "".join(_row_html(r) for r in rows)))
     out_path = results_dir() / "index.html"
     out_path.write_text(html_out, encoding="utf-8")
