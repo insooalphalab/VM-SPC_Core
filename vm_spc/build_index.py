@@ -169,8 +169,8 @@ def _etf_pred_cell(r: dict) -> str:
     note = ""
     if pr and pr["state"] != "중립":
         note_cls = "c-up" if pr["state"] == "동의" else "c-warn"
-        note = (f'<span class="note-block">괴리율 {pr["dprt"]:+.2f}% · '
-                f'<span class="{note_cls}">예측과 {"같은" if pr["state"] == "동의" else "반대"} 방향</span></span>')
+        note = (f'<span class="note-block">괴리 {pr["dprt"]:+.2f}% '
+                f'<span class="{note_cls}">{"같은 방향" if pr["state"] == "동의" else "반대 방향"}</span></span>')
     return f'<span class="val {cls}">{arrow} {label}</span> <span class="sub">{hr_str}</span>{note}'
 
 
@@ -178,7 +178,7 @@ def _sensor_signal_cell(r: dict) -> str:
     top = r["top"]
     if top is None:
         if r["champion"] is None:
-            return '<span class="c-empty">검증 대기<span class="note-block">(데이터 부족)</span></span>'
+            return '<span class="c-empty">데이터 부족</span>'
         return '<span class="c-muted">신호 없음</span>'
     p = r["top_p"]
     up = p >= 0.5
@@ -190,7 +190,7 @@ def _sensor_signal_cell(r: dict) -> str:
         # 게이트 미달(REJECTED) — Baseline 원값을 흐리게 보여준다. 빈칸보다 낫다는 판단이지만
         # 검증된 신호와는 확실히 구분되게(연한 색 + 라벨) 표시한다.
         arrow, label, cls = ("&#9650;", "상승", "c-muted") if up else ("&#9660;", "하락", "c-muted")
-        suffix = ' <span class="note-inline">(게이트 미달·참고)</span>'
+        suffix = ' <span class="note-inline">(참고)</span>'
     return (f'<span class="val {cls}">{arrow} {html.escape(top["name"])}</span> '
             f'<span class="sub">({html.escape(top["code"])})</span> '
             f'<span class="val {cls} strong">{conf:.0%}</span>{suffix}')
@@ -200,15 +200,14 @@ def _compression_badge(r: dict) -> str:
     cs = r.get("compression")
     if not cs or not cs["compressed"]:
         return ""
-    return (f'<div class="comp-badge" title="20일 변동성·고저폭이 모두 자기 과거 250일 중 하위 20% — 곧 크게 움직일 가능성이 '
-            f'평소보다 높지만 방향은 알려주지 않습니다">&#9889; 응축 중 {cs["streak"]}일째 · 큰 움직임 가능성↑ (방향 모름)</div>')
+    return (f' &middot; <span class="c-warn" title="20일 변동성·고저폭이 모두 자기 과거 250일 중 하위 20% — 곧 크게 움직일 가능성이 '
+            f'평소보다 높지만 방향은 알려주지 않습니다">&#9889; 응축 {cs["streak"]}일째</span>')
 
 
 def _pct_word(p: float | None) -> str:
     if p is None:
         return ""
-    word = "낮은 편" if p <= 0.2 else "높은 편" if p >= 0.8 else "중간"
-    return f" (5년 중 {word} {p:.0%})"
+    return f" ({p:.0%})"
 
 
 def _valuation_line(r: dict) -> str:
@@ -216,8 +215,8 @@ def _valuation_line(r: dict) -> str:
     v = r.get("valuation")
     if not v:
         return ""
-    per = f"PER {v['per']:.1f}배{_pct_word(v['per_pct'])}" if v["per"] is not None else "PER 적자"
-    pbr = f"PBR {v['pbr']:.2f}배{_pct_word(v['pbr_pct'])}" if v["pbr"] is not None else ""
+    per = f"PER {v['per']:.1f}{_pct_word(v['per_pct'])}" if v["per"] is not None else "PER 적자"
+    pbr = f"PBR {v['pbr']:.2f}{_pct_word(v['pbr_pct'])}" if v["pbr"] is not None else ""
     return (f'<div class="valuation" title="바스켓 합산(시가총액 ÷ 최근 4분기 순이익·자본총계, DART 공시 기준). '
             f'5년 중 위치는 자기 과거 대비 비싼지 싼지만 보여 주며, 방향 예측이 아닙니다.">'
             f'{per}{" &middot; " if pbr else ""}{pbr}</div>')
@@ -233,10 +232,10 @@ def _reports_line(r: dict) -> str:
         body = f"리포트 {v['n']}건(적음)"
     else:
         cls = "c-up" if v["net"] > 0 else "c-down" if v["net"] < 0 else ""
-        spread = {"up": " · 상향 확산", "down": " · 하향 확산"}.get(v["spread"], "")
-        body = f'애널리스트 순상향 <span class="{cls}">{v["net"]:+.0%}</span>{spread} ({v["n"]}건)'
+        spread = {"up": " 확산↑", "down": " 확산↓"}.get(v["spread"], "")
+        body = f'리포트 <span class="{cls}">{v["net"]:+.0%}</span>{spread} ({v["n"]}건)'
     return (f'<div class="valuation" title="최근 20거래일 증권사 리포트 목표가 (상향 − 하향) ÷ 리포트 수. 천천히 바뀌는 배경 정보 '
-            f'(검증이력 9.25).">{body} <span class="upd">{upd} 업데이트</span></div>')
+            f'(검증이력 9.25).">{body} <span class="upd">{upd}</span></div>')
 
 
 THEME_FAMILY = {                      # 같은 테마의 ETF(같은 타겟을 다른 센서로 본 바스켓 포함)는 카드 하나로 묶는다
@@ -290,7 +289,7 @@ def _group_html(g: list[dict]) -> str:
         return _row_html(lead)
     fam = _family(lead["basket"])
     subs = "".join(_sub_line(r, lead) for r in rest)
-    return _row_html(lead, extra=f'<div class="label">같은 테마 ({fam}) {len(rest)}개</div><div class="siblings">{subs}</div>')
+    return _row_html(lead, extra=f'<div class="label" style="margin-top:10px" title="같은 테마({fam}) ETF">같은 테마 {len(rest)}개</div><div class="siblings">{subs}</div>')
 
 
 def _row_html(r: dict, extra: str = "") -> str:
@@ -313,10 +312,10 @@ def _row_html(r: dict, extra: str = "") -> str:
         <div class="etf-name">{title}</div>
         <div class="etf-code">{html.escape(r['etf_code'])}</div>
       </div>
-      <div class="basket-sub">{html.escape(r['basket'])} &middot; 센서 {r['n_sensors']}종목</div>{_valuation_line(r)}{_reports_line(r)}{_compression_badge(r)}
-      <div class="label" title="이 ETF 자신의 내일 방향 예측(예측모델/Legacy 기준) — 구성종목 신호와는 다른 예측입니다.">ETF 자체 예측</div>
+      <div class="basket-sub" title="{html.escape(r['basket'])}">센서 {r['n_sensors']}종목{_compression_badge(r)}</div>{_valuation_line(r)}{_reports_line(r)}
+      <div class="label" title="이 ETF 자신의 내일 방향 예측(예측모델/Legacy 기준) — 구성종목 신호와는 다른 예측입니다.">내일</div>
       <div class="row-val">{_etf_pred_cell(r)}</div>
-      <div class="label" title="이 ETF를 구성하는 센서 종목들 중 서로 비교했을 때 가장 확신이 강한 종목 — 상대적 우열이지, 이 신호 때문에 ETF가 오른다는 뜻이 아닙니다.">구성종목 중 최고 신호</div>
+      <div class="label" title="이 ETF를 구성하는 센서 종목들 중 서로 비교했을 때 가장 확신이 강한 종목 — 상대적 우열이지, 이 신호 때문에 ETF가 오른다는 뜻이 아닙니다.">종목 신호</div>
       <div class="row-val last">{_sensor_signal_cell(r)}</div>{extra}
     </{tag}>"""
 
@@ -325,7 +324,7 @@ TEMPLATE = r"""<!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>VM-SPC Core — 전체 ETF 현황</title>
+<title>VM-SPC · ETF 내일 방향</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
   * { box-sizing:border-box; }
@@ -371,26 +370,33 @@ TEMPLATE = r"""<!DOCTYPE html>
   .sub { color:#64748b; font-size:0.75rem; }
   .note-inline { color:#475569; font-size:0.68rem; }
   .note-block { display:block; color:#475569; font-size:0.68rem; }
-  footer.note { font-size:0.75rem; color:#475569; margin-top:16px; }
+  details.how summary { font-size:0.75rem; color:#64748b; cursor:pointer; margin-top:6px; }
+  details.how p { font-size:0.75rem; }
 __RANK_CSS__
 </style>
 </head>
 <body>
   <header class="card">
-    <h1>VM-SPC Core — 전체 ETF 현황</h1>
-    <p>이 파이프라인의 1차 목표인 <b>ETF 자체 예측</b>의 적중률이 높은 순으로 정렬했습니다(__N_TOTAL__ 중
-      60% 이상 __N_SIGNAL__개). 적중률은 그 ETF를 같은 방향으로 예측했던 날의 적중률에 오늘 괴리율 효과(전체 ETF
-      합산 추정)를 반영한 값이고, <b>평소</b>는 예측과 상관없이 그 방향으로 움직인 날의 비율입니다 — 적중률이 평소보다
-      얼마나 높은지가 실제 예측 실력입니다. 구성종목 신호는 참고용이고, 자세한 근거는 각 ETF를 눌러 확인하세요.</p>
+    <h1>ETF 내일 방향</h1>
+    <p>적중률 높은 순 · <b>60% 이상 __N_SIGNAL__개</b> / __N_TOTAL__</p>
     <p>__COMP_NOTE__</p>
-    <p><a class="scn-link" href="scenario/risk_scenarios.html">&#128208; 박스권 손절·수량 가이드 (관심 종목) &rarr;</a></p>
-    <p class="meta">생성 시각: __GENERATED_AT__</p>
+    <p><a class="scn-link" href="scenario/risk_scenarios.html">&#128208; 관심 종목 손절·수량 가이드 &rarr;</a></p>
+    <details class="how"><summary>읽는 법</summary>
+      <p><b>내일</b> = ETF 자체 예측. 적중은 같은 방향으로 예측했던 날의 적중률에 오늘 괴리율 효과(전체 ETF 합산 추정)를
+        반영한 값, <b>평소</b>는 예측과 상관없이 그 방향으로 움직인 날의 비율 — 적중이 평소보다 얼마나 높은지가 실제 실력입니다.
+        괴리 표시는 오늘 괴리율이 예측과 같은/반대 방향일 때만.</p>
+      <p><b>종목 신호</b> = 구성 센서 종목 중 확신이 가장 강한 종목(상대 우열, ETF 방향과는 별개). "(참고)"는 검증 게이트 미달.</p>
+      <p><b>&#9889; 응축</b> = 20일 변동성·고저폭이 모두 자기 과거 250일 중 하위 20%. 큰 움직임 가능성만 알려주고 방향은 모릅니다.</p>
+      <p><b>PER·PBR</b> = 바스켓 합산(DART, 최근 4분기), %는 5년 중 위치 — 비싼지 싼지일 뿐 방향 예측 아님.
+        <b>리포트</b> = 최근 20거래일 목표가 (상향 − 하향) ÷ 리포트 수, 천천히 바뀌는 배경 정보(검증이력 9.25).</p>
+      <p>같은 테마 ETF(같은 ETF를 다른 센서로 본 바스켓 포함)는 한 카드로 묶었습니다(__N_TOTAL_DETAIL__).
+        자동 주문은 하지 않습니다 — 장 마감 후 계산한 참고용 신호이며 진입은 사람이 판단합니다.</p>
+    </details>
+    <p class="meta">__GENERATED_AT__</p>
   </header>
 
   <div class="grid">__ROWS__</div>
 __RANK_CARD__
-
-  <footer class="note">자동 주문은 하지 않습니다 — 장 마감 후 계산한 참고용 방향 신호이며, 진입 여부는 사람이 판단합니다.</footer>
 </body>
 </html>
 """
@@ -404,8 +410,8 @@ def _reference_section() -> str:
         return ""
     s = json.loads(p.read_text(encoding="utf-8"))
     upd = s.get("updated", s["to"])
-    return (f'<p class="ref">참고 · 섹터 리포트 흐름 전체 <span class="ref-date">({upd[5:].replace("-", "/")} 업데이트, 20거래일 누적 — '
-            f'섹터별 값은 각 카드에)</span> <a href="reports/sector_reports.html">보기 &rarr;</a></p>')
+    return (f'<p class="ref">참고 · 섹터 리포트 흐름 <span class="ref-date">({upd[5:].replace("-", "/")} 업데이트)</span> '
+            f'<a href="reports/sector_reports.html">보기 &rarr;</a></p>')
 
 
 def _compression_note(rows: list[dict]) -> str:
@@ -413,8 +419,8 @@ def _compression_note(rows: list[dict]) -> str:
     st = pooled_expansion([f for f in _COMP_CACHE.values() if f is not None])
     if st is None:
         return ""
-    return (f'<b class="c-warn">&#9889; 응축 중 {n}개</b> — 과거 ETF에서 응축 뒤 20일 안에 변동성이 1.5배 이상 커진 비율은 '
-            f'<b>{st["comp_rate"]:.0%}</b>(평소 {st["base_rate"]:.0%})입니다. 큰 움직임이 올 가능성만 알려주고, 방향은 알려주지 않습니다.')
+    return (f'<b class="c-warn">&#9889; 응축 {n}개</b> · 20일 내 변동성 1.5배↑ '
+            f'<b>{st["comp_rate"]:.0%}</b> (평소 {st["base_rate"]:.0%}) · 방향 모름')
 
 
 def build_index() -> int:
@@ -427,7 +433,8 @@ def build_index() -> int:
                   and r["etf_pred"]["hit_rate"] >= 0.6)
     from datetime import datetime
     html_out = (TEMPLATE
-                .replace("__N_TOTAL__", f"바스켓 {len(rows)}개, 같은 테마는 한 카드로 묶어 카드 {len(group_rows(rows))}개")
+                .replace("__N_TOTAL_DETAIL__", f"바스켓 {len(rows)}개 → 카드 {len(group_rows(rows))}개")
+                .replace("__N_TOTAL__", f"{len(rows)}개")
                 .replace("__N_SIGNAL__", str(n_signal))
                 .replace("__GENERATED_AT__", datetime.now(KST).strftime("%Y-%m-%d %H:%M"))
                 .replace("__COMP_NOTE__", _compression_note(rows))
