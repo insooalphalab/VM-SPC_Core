@@ -19,6 +19,7 @@ for _p in (_ROOT, _ROOT / "core", _ROOT / "vm_predict", _ROOT / "pair_spc"):
         _sys.path.insert(0, str(_p))
 
 import argparse
+import json
 import logging
 import sys
 from datetime import datetime
@@ -91,6 +92,29 @@ def build_digest(run_status: str = "ok") -> str:
     return "\n".join(lines)
 
 
+def build_stock_digest() -> str | None:
+    """관심 종목 전략(손절·수량 페이지) 요약 — 종목당 한 줄, 검증된 셋업·규칙 충족·보유 종목을 위로. 대기 종목은 한 줄로 묶음."""
+    p = results_dir() / "scenario" / "summary.json"
+    if not p.exists():
+        return None
+    rows = json.loads(p.read_text(encoding="utf-8"))
+    if not rows:
+        return None
+    rank = lambda r: (not r["verified"], not r["panic"], not (r["active"] or r["hold"]))
+    lines = [f"🎯 관심 종목 전략 — {rows[0]['date'][5:].replace('-', '/')} 종가"]
+    waiting = []
+    for r in sorted(rows, key=rank):
+        if r["verified"] or r["panic"] or r["active"] or r["hold"]:
+            mark = "★" if r["verified"] else "⚠" if r["panic"] else "•"
+            lines.append(f"{mark} {r['name']}: {r['head']} ({r['verdict']})")
+        else:
+            waiting.append(r["name"] + ("" if r["verdict"] == "방향 근거 없음" else f"({r['verdict']})"))
+    if waiting:
+        lines.append("대기: " + ", ".join(waiting))
+    lines.append("손절·수량 계산은 첨부한 risk_scenarios.html")
+    return "\n".join(lines)
+
+
 def send_message(text: str) -> None:
     token = get_secret("TELEGRAM_BOT_TOKEN")
     chat_id = get_secret("TELEGRAM_CHAT_ID")
@@ -122,6 +146,7 @@ def main() -> int:
     digest = build_digest(args.run_status)
     if args.dry_run:
         print(digest)
+        print("\n" + (build_stock_digest() or "(관심 종목 요약 없음)"))
         return 0
 
     # 공휴일(평일 휴장)에도 스케줄은 돌기 때문에, 마지막으로 알린 거래일과 최신 데이터 거래일이
@@ -136,6 +161,12 @@ def main() -> int:
         index_path = results_dir() / "index.html"
         if index_path.exists():
             send_document(index_path, caption="전체 ETF 현황 — 상세 대시보드는 구글 드라이브 '내 드라이브/VM-SPC_Core/results'에서 확인")
+        # 두 번째 대시보드: 관심 종목 손절·수량 가이드(요약 + 파일)
+        stock = build_stock_digest()
+        risk_path = results_dir() / "scenario" / "risk_scenarios.html"
+        if stock and risk_path.exists():
+            send_message(stock)
+            send_document(risk_path, caption="관심 종목 손절·수량 가이드")
         log.info("텔레그램 전송 완료")
     except Exception:
         log.exception("텔레그램 전송 실패")

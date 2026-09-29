@@ -62,7 +62,7 @@ python vm_spc/pipeline.py                                          # 챔피언-�
 5. `vm_spc/pipeline.py`: 챔피언-챌린저 → `index.html`
 6. `scenario/render_risk.py`: 손절·수량 가이드 페이지(목록 종목 수급 증분 갱신 포함, 인덱스 상단에 링크)
 7. `results/` → `G:\내 드라이브\VM-SPC_Core` 미러링, `basket_watchlist.json`·`scenario_targets.json` 백업
-8. `vm_spc/notify_telegram.py`: 요약 + `index.html` 전송(같은 거래일은 생략, 앞 단계 실패 시 경고)
+8. `vm_spc/notify_telegram.py`: ① ETF 요약 + `index.html`, ② 관심 종목 전략 요약(종목당 한 줄, ★ 검증된 셋업·규칙 충족·보유 종목 먼저) + `risk_scenarios.html` 전송(같은 거래일은 생략, 앞 단계 실패 시 경고)
 
 주의:
 - 스케줄러는 PowerShell을 VBScript로 창 없이 띄웁니다. `powershell -WindowStyle Hidden`은 창이 보이고, 클릭하면 프로세스가 멈춥니다.

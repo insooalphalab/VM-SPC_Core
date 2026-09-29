@@ -239,7 +239,61 @@ def _reports_line(r: dict) -> str:
             f'(검증이력 9.25).">{body} <span class="upd">{upd} 업데이트</span></div>')
 
 
-def _row_html(r: dict) -> str:
+THEME_FAMILY = {                      # 같은 테마의 ETF(같은 타겟을 다른 센서로 본 바스켓 포함)는 카드 하나로 묶는다
+    "semiconductor": "반도체", "cosmetics": "화장품", "power": "전력기기",
+    "secondary_battery": "2차전지", "nuclear": "원전",
+}
+
+
+def _family(basket: str) -> str:
+    for prefix, name in THEME_FAMILY.items():
+        if basket.startswith(prefix + "_"):
+            return name
+    return basket                      # 묶을 테마가 없으면 자기 자신
+
+
+def group_rows(rows: list[dict]) -> list[list[dict]]:
+    """테마별 묶음 — 대표 = 테마 바스켓(*_to_etf) 우선, 없으면 센서가 많은 쪽. 묶음 순서는 대표 카드의 기존 정렬 순서."""
+    fam: dict[str, list[dict]] = {}
+    for r in rows:
+        fam.setdefault(_family(r["basket"]), []).append(r)
+    groups = []
+    for members in fam.values():
+        lead = max(members, key=lambda m: (m["basket"].endswith("_to_etf"), m["n_sensors"]))
+        rest = sorted((m for m in members if m is not lead),
+                      key=lambda m: -(m["etf_pred"]["hit_rate"] if m["etf_pred"] and m["etf_pred"]["hit_rate"] is not None else -1))
+        groups.append([lead, *rest])
+    order = {id(r): i for i, r in enumerate(rows)}
+    return sorted(groups, key=lambda g: order[id(g[0])])
+
+
+def _sub_line(r: dict, lead: dict) -> str:
+    """묶음 안 다른 ETF 한 줄 — 같은 ETF면 "다른 센서 구성"으로 표시."""
+    ep = r["etf_pred"]
+    if ep:
+        arrow = "&#9650;" if ep["pred_up"] else "&#9660;"
+        hr = f" {ep['hit_rate']:.0%}" if ep["hit_rate"] is not None else ""
+        usual = f" <span class=\"sub\">(평소 {ep['usual']:.0%})</span>" if ep.get("usual") is not None else ""
+        pred = f'<span class="{"c-up" if ep["pred_up"] else "c-flat"}">{arrow}</span>{hr}{usual}'
+    else:
+        pred = '<span class="c-empty">—</span>'
+    comp = ' <span class="c-warn">&#9889;</span>' if r.get("compression") and r["compression"]["compressed"] else ""
+    same = r["etf_code"] == lead["etf_code"]
+    label = (f"다른 센서 구성 ({r['n_sensors']}종목)" if same else html.escape(r["etf_name"]))
+    name = f'<a href="{r["basket"]}/dashboard_v2.html">{label}</a>' if r["has_dashboard"] else label
+    return f'<div class="sibling">{name} · {pred}{comp}</div>'
+
+
+def _group_html(g: list[dict]) -> str:
+    lead, rest = g[0], g[1:]
+    if not rest:
+        return _row_html(lead)
+    fam = _family(lead["basket"])
+    subs = "".join(_sub_line(r, lead) for r in rest)
+    return _row_html(lead, extra=f'<div class="label">같은 테마 ({fam}) {len(rest)}개</div><div class="siblings">{subs}</div>')
+
+
+def _row_html(r: dict, extra: str = "") -> str:
     """표(가로 스크롤)는 모바일에서 셀마다 세로로 뭉개지는 문제가 있어서, 폭에 상관없이
     항상 읽히는 카드 하나로 바꿨다(2026-09-27, 모바일 실사용 피드백) — 좁은 화면에선 1열로
     쌓이고 넓은 화면에선 그리드로 나열된다(TEMPLATE 의 .grid 미디어쿼리).
@@ -251,18 +305,19 @@ def _row_html(r: dict) -> str:
     link = f"{r['basket']}/dashboard_v2.html" if r["has_dashboard"] else None
     ep = r["etf_pred"]
     strong = " strong" if (ep and ep["hit_rate"] is not None and ep["hit_rate"] >= 0.6) else ""
-    tag = "a" if link else "div"
-    href_attr = f' href="{link}"' if link else ""
+    tag = "a" if link and not extra else "div"          # 안에 다른 링크가 있으면 카드 전체 링크 대신 제목만 링크
+    href_attr = f' href="{link}"' if tag == "a" else ""
+    title = (f'<a href="{link}">{html.escape(r["etf_name"])}</a>' if (link and extra) else html.escape(r["etf_name"]))
     return f"""<{tag}{href_attr} class="card{strong}">
       <div class="card-top">
-        <div class="etf-name">{html.escape(r['etf_name'])}</div>
+        <div class="etf-name">{title}</div>
         <div class="etf-code">{html.escape(r['etf_code'])}</div>
       </div>
       <div class="basket-sub">{html.escape(r['basket'])} &middot; 센서 {r['n_sensors']}종목</div>{_valuation_line(r)}{_reports_line(r)}{_compression_badge(r)}
       <div class="label" title="이 ETF 자신의 내일 방향 예측(예측모델/Legacy 기준) — 구성종목 신호와는 다른 예측입니다.">ETF 자체 예측</div>
       <div class="row-val">{_etf_pred_cell(r)}</div>
       <div class="label" title="이 ETF를 구성하는 센서 종목들 중 서로 비교했을 때 가장 확신이 강한 종목 — 상대적 우열이지, 이 신호 때문에 ETF가 오른다는 뜻이 아닙니다.">구성종목 중 최고 신호</div>
-      <div class="row-val last">{_sensor_signal_cell(r)}</div>
+      <div class="row-val last">{_sensor_signal_cell(r)}</div>{extra}
     </{tag}>"""
 
 
@@ -308,6 +363,8 @@ TEMPLATE = r"""<!DOCTYPE html>
   p.ref { margin-top:16px; font-size:0.75rem; color:#94a3b8; line-height:1.6; }
   p.ref .ref-date { color:#64748b; }
   .valuation .upd { color:#475569; font-size:0.66rem; } p.ref a { color:#94a3b8; text-decoration:underline; }
+  .siblings { margin-top:4px; font-size:0.8rem; color:#94a3b8; line-height:1.7; }
+  .siblings a, .etf-name a { color:inherit; text-decoration:none; } .siblings a { border-bottom:1px dotted #475569; }
   .comp-badge { display:table; font-size:0.72rem; color:#fbbf24; background:rgba(251,191,36,0.1);
                 border:1px solid rgba(251,191,36,0.35); border-radius:6px; padding:2px 6px; margin:-4px 0 8px; }
   .valuation { font-size:0.72rem; color:#94a3b8; margin:-6px 0 10px; }
@@ -370,13 +427,13 @@ def build_index() -> int:
                   and r["etf_pred"]["hit_rate"] >= 0.6)
     from datetime import datetime
     html_out = (TEMPLATE
-                .replace("__N_TOTAL__", str(len(rows)))
+                .replace("__N_TOTAL__", f"바스켓 {len(rows)}개, 같은 테마는 한 카드로 묶어 {len(group_rows(rows))}개")
                 .replace("__N_SIGNAL__", str(n_signal))
                 .replace("__GENERATED_AT__", datetime.now(KST).strftime("%Y-%m-%d %H:%M"))
                 .replace("__COMP_NOTE__", _compression_note(rows))
                 .replace("__RANK_CARD__", _reference_section())   # 천천히 바뀌는 배경 자료는 맨 아래 접어서만
                 .replace("__RANK_CSS__", "")
-                .replace("__ROWS__", "".join(_row_html(r) for r in rows)))
+                .replace("__ROWS__", "".join(_group_html(g) for g in group_rows(rows))))
     out_path = results_dir() / "index.html"
     out_path.write_text(html_out, encoding="utf-8")
     log.info("생성 완료: %s (%d개 ETF, 신호 %d개)", out_path, len(rows), n_signal)

@@ -13,7 +13,7 @@
 #      상세 대시보드까지 열람 가능하게. index.html 의 링크는 상대경로라 results/ 폴더 구조가 통째로
 #      옆에 있어야 클릭이 된다(단, 드라이브 모바일 앱이 그 상대링크 이동을 보장하진 않는다 — 그래도
 #      백업/개별 파일 열람 용도로는 충분하다는 걸 확인하고 2026-09-27에 추가함).
-#   5) vm_spc/notify_telegram.py — 오늘 요약 다이제스트 + index.html 첨부를 텔레그램으로 전송
+#   5) vm_spc/notify_telegram.py — ① ETF 요약 + index.html, ② 관심 종목 전략 요약 + risk_scenarios.html 을 텔레그램으로 전송
 #
 # 실행 로그는 logs/pipeline_YYYYMMDD_HHMMSS.log 에 UTF-8로 남는다(.gitignore 의 *.log 에 이미 포함).
 #

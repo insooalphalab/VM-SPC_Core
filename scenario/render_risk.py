@@ -296,6 +296,7 @@ def refresh_flows(caller, code: str) -> None:
             print(f"{code} 수급 갱신 실패: {e}", file=sys.stderr)
 
 
+SUMMARY: list[dict] = []    # build() 동안 종목별 가이드 요약을 모아 results/scenario/summary.json 으로 (텔레그램이 읽음)
 STOCK_REPORT_DAYS = 60     # 종목 하나는 리포트가 드물어 섹터(20거래일)보다 길게
 
 
@@ -553,6 +554,18 @@ def evidence(code: str, bars: pd.DataFrame, st: dict, fl: list, active: list) ->
     return pro, con
 
 
+def evidence_verdict(pro: list, con: list) -> str:
+    """"찬성 우세 · 신뢰 낮음" 같은 한 마디(텔레그램 요약용). 근거가 없으면 "방향 근거 없음"."""
+    wp = sum(EVIDENCE_W[g] for _, g in pro)
+    wc = sum(EVIDENCE_W[g] for _, g in con)
+    if wp + wc == 0:
+        return "방향 근거 없음"
+    top = max(EVIDENCE_W[g] for _, g in pro + con)
+    trust = "신뢰 보통" if top >= 3 else "신뢰 낮음~보통" if top >= 2 else "신뢰 낮음"
+    side = "찬성 우세" if wp > wc * 1.5 else "반대 우세" if wc > wp * 1.5 else "팽팽"
+    return f"{side} · {trust}"
+
+
 def evidence_html(pro: list, con: list) -> str:
     wp = sum(EVIDENCE_W[g] for _, g in pro)
     wc = sum(EVIDENCE_W[g] for _, g in con)
@@ -648,8 +661,10 @@ def guide(bars: pd.DataFrame, st: dict, pl: list[dict], ctl: dict, cs: dict | No
                          f'<span class="g-why">(허용 손실 <span class="g-b">–</span>원)</span>{why}</span></li>')
         else:
             items.append(f'<li class="g-{kind}"><span class="gi">{icon[kind]}</span>{html.escape(body)}</li>')
+    meta = {"head": head, "verdict": evidence_verdict(pro, con), "verified": bool(active and active[0].get("t2")),
+            "panic": any(t == "투매 당일" for t, _ in con), "active": bool(active), "hold": bool(hold)}
     return (f'<div class="guide{" on" if active or hold else ""}"><div class="g-head">{html.escape(head)}</div>'
-            f'<ul>{"".join(items)}</ul></div>')
+            f'<ul>{"".join(items)}</ul></div>'), meta
 
 
 def stock_section(code: str, name: str, bars: pd.DataFrame, pooled: dict, first: bool, hold: dict | None = None) -> str:
@@ -684,7 +699,8 @@ def stock_section(code: str, name: str, bars: pd.DataFrame, pooled: dict, first:
     nr = co["next_report"]
     nr_txt = f"{nr[0]} ~{nr[1]:%m/%d}" if nr else "–"
     comp = (f'<span class="c-warn">&#9889; 응축 {cs["streak"]}일째</span>' if cs and cs["compressed"] else '<span class="sub">응축 아님</span>')
-    gd = guide(bars, st, pl, ctl, cs, co, fl, vr, hold, code)
+    gd, meta = guide(bars, st, pl, ctl, cs, co, fl, vr, hold, code)
+    SUMMARY.append({"code": code, "name": name, "date": f"{bars.index[-1]:%Y-%m-%d}", **meta})
     return f"""<section id="s-{code}" class="stock{' show' if first else ''}">
     {gd}
     <div class="card">
@@ -880,6 +896,7 @@ PAGE = r"""<!DOCTYPE html>
 
 
 def build(codes: list[str], fetch: bool = True, holdings: dict | None = None) -> str:
+    SUMMARY.clear()
     pooled = pooled_outcomes()
     holdings = target_holdings() if holdings is None else holdings
     tabs, secs = [], []
@@ -909,6 +926,7 @@ def build(codes: list[str], fetch: bool = True, holdings: dict | None = None) ->
     out = results_dir() / "scenario" / "risk_scenarios.html"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(page, encoding="utf-8")
+    (out.parent / "summary.json").write_text(json.dumps(SUMMARY, ensure_ascii=False, indent=1), encoding="utf-8")
     return str(out)
 
 
