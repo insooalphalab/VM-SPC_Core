@@ -378,7 +378,7 @@ __RANK_CSS__
 <body>
   <header class="card">
     <h1>VM-SPC Core — 전체 ETF 현황</h1>
-    <p>이 파이프라인의 1차 목표인 <b>ETF 자체 예측</b>의 적중률이 높은 순으로 정렬했습니다(__N_TOTAL__개 중
+    <p>이 파이프라인의 1차 목표인 <b>ETF 자체 예측</b>의 적중률이 높은 순으로 정렬했습니다(__N_TOTAL__ 중
       60% 이상 __N_SIGNAL__개). 적중률은 그 ETF를 같은 방향으로 예측했던 날의 적중률에 오늘 괴리율 효과(전체 ETF
       합산 추정)를 반영한 값이고, <b>평소</b>는 예측과 상관없이 그 방향으로 움직인 날의 비율입니다 — 적중률이 평소보다
       얼마나 높은지가 실제 예측 실력입니다. 구성종목 신호는 참고용이고, 자세한 근거는 각 ETF를 눌러 확인하세요.</p>
@@ -427,7 +427,7 @@ def build_index() -> int:
                   and r["etf_pred"]["hit_rate"] >= 0.6)
     from datetime import datetime
     html_out = (TEMPLATE
-                .replace("__N_TOTAL__", f"바스켓 {len(rows)}개, 같은 테마는 한 카드로 묶어 {len(group_rows(rows))}개")
+                .replace("__N_TOTAL__", f"바스켓 {len(rows)}개, 같은 테마는 한 카드로 묶어 카드 {len(group_rows(rows))}개")
                 .replace("__N_SIGNAL__", str(n_signal))
                 .replace("__GENERATED_AT__", datetime.now(KST).strftime("%Y-%m-%d %H:%M"))
                 .replace("__COMP_NOTE__", _compression_note(rows))
