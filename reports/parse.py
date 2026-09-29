@@ -29,7 +29,7 @@ from v2_config import data_dir
 KST = timezone(timedelta(hours=9))
 BROKER_ALIAS = {"신한금융투자": "신한투자증권", "하나금융투자": "하나증권", "이베스트투자증권": "LS증권"}
 
-B_HEAD = re.compile(r"^\s*(.+?)\s*\((\d{6})\)", re.M)
+B_HEAD = re.compile(r"^\s*(.+?)\s*\(([0-9A-Z]{6})\)", re.M)     # 2026년 신규 상장은 영문 섞인 코드(예: 0126Z0)
 B_DATE = re.compile(r"작성일:\s*(\d{4})\.(\d{1,2})\.(\d{1,2})")
 B_BROKER = re.compile(r"작성자:\s*([^\(\n]+?)\s*(?:\(|\n|$)")
 B_OPINION = re.compile(r"투자의견:\s*([^\n]+)")
@@ -61,13 +61,16 @@ def _broker(s: str) -> str:
 def parse_butler(msg: dict) -> dict | None:
     t = msg["text"]
     head, date, broker = B_HEAD.search(t), B_DATE.search(t), B_BROKER.search(t)
-    if not (head and date and broker):
+    if not (head and broker):
         return None
+    if date:
+        d = f"{int(date.group(1)):04d}-{int(date.group(2)):02d}-{int(date.group(3)):02d}"
+    else:                                   # "작성일: Invalid DateTime"(채널 쪽 오류) → 게시일로 대신
+        d = datetime.fromisoformat(msg["date"]).astimezone(KST).date().isoformat()
     tp = B_TP.search(t)
     op = B_OPINION.search(t)
     pr = B_PRICE.search(t)
-    return {"date": f"{int(date.group(1)):04d}-{int(date.group(2)):02d}-{int(date.group(3)):02d}",
-            "code": head.group(2), "name": head.group(1).strip(), "broker": _broker(broker.group(1)),
+    return {"date": d, "code": head.group(2), "name": head.group(1).strip(), "broker": _broker(broker.group(1)),
             "opinion": op.group(1).strip() if op else None, "tp": to_float(tp.group(1)) if tp else None,
             "dir": _dir_from_marker(tp.group(2) if tp else None, t) if tp else "none",
             "price": to_float(pr.group(1)) if pr else None, "source": "butler_works", "msg_id": msg["id"]}
