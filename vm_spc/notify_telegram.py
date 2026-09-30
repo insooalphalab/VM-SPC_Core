@@ -102,6 +102,14 @@ def build_stock_digest() -> str | None:
         return None
     rank = lambda r: (not r["verified"], not r["panic"], not (r["active"] or r["hold"]))
     lines = [f"🎯 관심 종목 전략 — {rows[0]['date'][5:].replace('-', '/')} 종가"]
+    mp = results_dir() / "scenario" / "market.json"
+    m = json.loads(mp.read_text(encoding="utf-8")) if mp.exists() else {}
+    if m.get("state"):
+        lines.append(f"📊 코스피 {m['state']} {m['days']}일째 — {m['favor']}")
+    bp = results_dir() / "reports" / "market_brief.json"
+    br = json.loads(bp.read_text(encoding="utf-8")) if bp.exists() else {}
+    if br.get("title"):
+        lines.append(f"📰 시황({br['date'][5:10].replace('-', '/')} {br['kind']}): {br['title']}")
     waiting = []
     for r in sorted(rows, key=rank):
         if r["verified"] or r["panic"] or r["active"] or r["hold"]:
@@ -113,6 +121,19 @@ def build_stock_digest() -> str | None:
         lines.append("대기: " + ", ".join(waiting))
     lines.append("손절·수량 계산은 첨부한 risk_scenarios.html")
     return "\n".join(lines)
+
+
+def build_screen_digest() -> str | None:
+    """오늘의 후보(scenario/screen.py) — 코스피 시총 상위 200에서 장세에 맞는 규칙 충족 종목 이름만 한 줄씩."""
+    p = results_dir() / "scenario" / "screen.json"
+    if not p.exists():
+        return None
+    r = json.loads(p.read_text(encoding="utf-8"))
+    one = lambda x: (x.get("star", "") + x["name"] + (f" {x['win']:.0%}" if x.get("win") is not None else ""))
+    names = lambda xs: ", ".join(one(x) for x in xs) or "없음"
+    body = "\n".join(f"{ls['label']}: {names(ls['items'])}" for ls in r.get("lists", []))
+    return (f"🔎 오늘의 후보 — 코스피 {r.get('state')} · {r.get('strategy')} (코스피 시총 상위 200)\n{body}\n"
+            "승률 높은 순 · ★ 정상 수량(T² 동반) ☆ 절반 · 규칙 충족 목록, 추천 아님")
 
 
 def send_message(text: str) -> None:
@@ -147,6 +168,7 @@ def main() -> int:
     if args.dry_run:
         print(digest)
         print("\n" + (build_stock_digest() or "(관심 종목 요약 없음)"))
+        print("\n" + (build_screen_digest() or "(오늘의 후보 없음)"))
         return 0
 
     # 공휴일(평일 휴장)에도 스케줄은 돌기 때문에, 마지막으로 알린 거래일과 최신 데이터 거래일이
@@ -167,6 +189,13 @@ def main() -> int:
         if stock and risk_path.exists():
             send_message(stock)
             send_document(risk_path, caption="관심 종목 손절·수량 가이드")
+        # 세 번째: 오늘의 후보(코스피 200 스크리닝)
+        scr = build_screen_digest()
+        scr_path = results_dir() / "scenario" / "screen.html"
+        if scr:
+            send_message(scr)
+            if scr_path.exists():
+                send_document(scr_path, caption="오늘의 후보 — 관심 종목과 같은 양식")
         log.info("텔레그램 전송 완료")
     except Exception:
         log.exception("텔레그램 전송 실패")

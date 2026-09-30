@@ -8,6 +8,7 @@
 
   python reports/collect_web.py                   # 목표가가 있는 두 채널
   python reports/collect_web.py butler_works      # 채널 지정
+  python reports/collect_web.py aicorporateanalysisdeepdive   # 뉴스 요약(최근 RECENT_DAYS일만)
 """
 from __future__ import annotations
 
@@ -31,6 +32,7 @@ from tg_collect import raw_path
 
 log = logging.getLogger("reports.collect_web")
 DEFAULT = ["butler_works", "ked_epic_ai"]
+RECENT_DAYS = {"aicorporateanalysisdeepdive": 90}    # 뉴스 요약 채널: 글이 많아 최근 N일만(그 이전은 필요하면 API로)
 PAUSE = 1.0
 UA = {"User-Agent": "Mozilla/5.0 (VM-SPC Core personal research)"}
 
@@ -78,19 +80,24 @@ def _state_path(ch: str):
 
 
 def _walk(ch: str, before: int | None, stop_at: int, saved: set[int], f) -> tuple[int, bool]:
-    """before 부터 과거로 내려가며 stop_at 이하에 닿거나 첫 글까지 저장. (새 글 수, 첫 글까지 닿았는지)."""
+    """before 부터 과거로 내려가며 stop_at 이하에 닿거나 첫 글까지 저장. (새 글 수, 첫 글까지 닿았는지).
+    RECENT_DAYS 채널은 그 기간 밖에 닿으면 '다 받음'으로 본다."""
+    from datetime import datetime, timedelta, timezone
+    since = (datetime.now(timezone.utc) - timedelta(days=RECENT_DAYS[ch])).isoformat() if ch in RECENT_DAYS else ""
     n = 0
     while True:
         page = fetch_page(ch, before)
         if not page:
             return n, True
         for m in sorted(page, key=lambda x: x["id"]):
-            if m["id"] > stop_at and m["id"] not in saved:
+            if m["id"] > stop_at and m["id"] not in saved and m["date"] >= since:
                 f.write(json.dumps(m, ensure_ascii=False) + "\n")
                 saved.add(m["id"])
                 n += 1
         f.flush()
         oldest = min(m["id"] for m in page)
+        if since and min(m["date"] for m in page) < since:
+            return n, True
         if oldest <= stop_at:
             return n, False
         if oldest <= 1:

@@ -9,11 +9,12 @@
 #   2.7) reports/run.py — 텔레그램 리포트 요약 새 글 → 섹터 리포트 흐름(배경 자료, 인덱스 맨 아래)
 #   3) vm_spc/pipeline.py     — 챔피언-챌린저 Walk-Forward 재검증 → 탭 렌더링 → results/index.html 자동 갱신
 #   3.5) scenario/render_risk.py — 박스권 손절·수량 페이지(scenario_targets.json 종목, 수급 증분 갱신)
+#   3.6) scenario/screen.py — 오늘의 후보: 코스피 시총 상위 200에서 장세별 전략표에 맞는 규칙 충족 종목(목록별 상위 5)
 #   4) results/ → 구글 드라이브 동기화 폴더로 미러링(robocopy /MIR) — 폰에서 구글 드라이브 앱으로
 #      상세 대시보드까지 열람 가능하게. index.html 의 링크는 상대경로라 results/ 폴더 구조가 통째로
 #      옆에 있어야 클릭이 된다(단, 드라이브 모바일 앱이 그 상대링크 이동을 보장하진 않는다 — 그래도
 #      백업/개별 파일 열람 용도로는 충분하다는 걸 확인하고 2026-09-27에 추가함).
-#   5) vm_spc/notify_telegram.py — ① ETF 요약 + index.html, ② 관심 종목 전략 요약 + risk_scenarios.html 을 텔레그램으로 전송
+#   5) vm_spc/notify_telegram.py — ① ETF 요약 + index.html, ② 관심 종목 전략 요약 + risk_scenarios.html, ③ 오늘의 후보 + screen.html 을 텔레그램으로 전송
 #
 # 실행 로그는 logs/pipeline_YYYYMMDD_HHMMSS.log 에 UTF-8로 남는다(.gitignore 의 *.log 에 이미 포함).
 #
@@ -95,8 +96,10 @@ $rcR = Run-Step "analyst reports (reference)"             "reports\run.py"
 $rc3 = Run-Step "vm_spc champion-challenger + index"       "vm_spc\pipeline.py"
 # 박스권 손절·수량 페이지(scenario_targets.json 종목, 수급 증분 갱신 포함) — 드라이브 동기화 전에 만들어 폰에서도 최신본
 $rcS = Run-Step "scenario risk page"                      "scenario\render_risk.py"
+# 오늘의 후보: 코스피 시총 상위 200에서 현재 장세 전략표(scenario/screen.py PLAYBOOK)에 맞는 규칙 충족 종목
+$rcC = Run-Step "screen candidates (KOSPI 200)"          "scenario\screen.py"
 
-Write-Utf8Line "`nALL DONE: vm_predict=$rc1 pair_spc=$rc2 dart=$rcD reports=$rcR vm_spc=$rc3 scenario=$rcS"
+Write-Utf8Line "`nALL DONE: vm_predict=$rc1 pair_spc=$rc2 dart=$rcD reports=$rcR vm_spc=$rc3 scenario=$rcS screen=$rcC"
 
 # 구글 드라이브 동기화 폴더(G:\내 드라이브, Drive for Desktop)로 results/ 를 통째로 미러링.
 # robocopy /MIR 는 소스에 없는 파일은 대상에서도 지워서 완전히 최신 상태로 맞춘다. G: 드라이브가
@@ -118,7 +121,7 @@ if (Test-Path "G:\") {
 
 # 앞 3단계 중 하나라도 실패했으면 텔레그램 메시지 맨 위에 경고를 붙인다(그래도 전송은 한다 —
 # 뭐가 됐는지 안 된 건지 아는 게 아무 소식 없는 것보다 낫다).
-$runStatus = if (($rc1 -eq 0) -and ($rc2 -eq 0) -and ($rcD -eq 0) -and ($rcR -eq 0) -and ($rc3 -eq 0) -and ($rcS -eq 0)) { "ok" } else { "warn" }
+$runStatus = if (($rc1 -eq 0) -and ($rc2 -eq 0) -and ($rcD -eq 0) -and ($rcR -eq 0) -and ($rc3 -eq 0) -and ($rcS -eq 0) -and ($rcC -eq 0)) { "ok" } else { "warn" }
 $rc4 = Run-Step "notify_telegram" "vm_spc\notify_telegram.py" @("--run-status", $runStatus)
 
 # 로그 30일 이상 지난 건 정리

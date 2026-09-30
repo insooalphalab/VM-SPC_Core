@@ -26,7 +26,7 @@ import numpy as np
 import pandas as pd
 
 from v2_compression import compression_frame, current_state
-from v2_config import KST, Params, load_baskets, results_dir
+from v2_config import KST, Params, data_dir, load_baskets, results_dir
 from v2_cusum import cusum
 from v2_signals import kalman_features
 from v2_datastore import load_bars
@@ -143,15 +143,15 @@ def active_state(bars: pd.DataFrame) -> dict:
                     "t2": bool(t2[b])}            # 이탈일 T² 초과 = 검증된 셋업 조건(9.27)
             if rec == n - 1:
                 return {**base, "entry": c[-1], "status": "진입 신호",
-                        "detail": "오늘 하단 위로 복귀 → 내일 시가 진입"}
+                        "detail": "오늘 종가로 하단 위 복귀 완료 → 내일 시가 매수"}
             if rec is not None and rec + 1 < n:
                 live = _open_trade(o, h, l, c, rec + 1, stop, H[b])
                 if live:
                     return {**base, "entry": o[rec + 1], "fixed_entry": True, "status": "진행 중",
-                            "detail": f"{bars.index[rec + 1]:%m/%d} 진입 · {live}"}
+                            "detail": f"{bars.index[rec]:%m/%d} 복귀 완료 · {bars.index[rec + 1]:%m/%d} 시가가 규칙상 매수가 · {live}"}
             if rec is None and n - 1 - b < FAIL_RECOVER:
                 return {**base, "status": "복귀 대기",
-                        "detail": f"{bars.index[b]:%m/%d} 하단 이탈 · {FAIL_RECOVER - (n - 1 - b)}일 안에 {L[b]:,.0f} 위 복귀 시 진입"}
+                        "detail": f"{bars.index[b]:%m/%d} 하단 이탈 · {FAIL_RECOVER - (n - 1 - b)}일 안에 {L[b]:,.0f} 위로 마감하면 다음 날 시가 매수"}
             break
     # 돌파 리테스트: 최근 RETEST_WITHIN일 안에 H 위 마감
     for b in range(n - 1, n - 1 - RETEST_WITHIN - 1, -1):
@@ -166,15 +166,15 @@ def active_state(bars: pd.DataFrame) -> dict:
             if l[k] <= hb:
                 if k == n - 1:
                     return {**base, "entry": c[-1], "status": "진입 신호",
-                            "detail": "되밀림 후 중간선 위 마감 → 내일 시가 진입"}
+                            "detail": "되밀림 후 중간선 위 마감 완료 → 내일 시가 매수"}
                 live = _open_trade(o, h, l, c, k + 1, mb, hb + (hb - lb))
                 if not live:
                     return {"kind": None}
                 return {**base, "entry": o[k + 1], "fixed_entry": True, "status": "진행 중",
-                        "detail": f"{bars.index[k + 1]:%m/%d} 진입 · {live}"}
+                        "detail": f"{bars.index[k]:%m/%d} 리테스트 확인 · {bars.index[k + 1]:%m/%d} 시가가 규칙상 매수가 · {live}"}
         if n - 1 - b < RETEST_WITHIN:
             return {**base, "status": "리테스트 대기",
-                    "detail": f"{bars.index[b]:%m/%d} 상단 돌파 · {RETEST_WITHIN - (n - 1 - b)}일 안에 {hb:,.0f}까지 되밀리고 종가 {mb:,.0f} 위면 진입"}
+                    "detail": f"{bars.index[b]:%m/%d} 상단 돌파 완료 · {RETEST_WITHIN - (n - 1 - b)}일 안에 {hb:,.0f}까지 되밀리고 종가가 {mb:,.0f} 위면 다음 날 시가 매수"}
         break
     return {"kind": None}
 
@@ -336,6 +336,30 @@ def stock_reports(code: str, close: float) -> str | None:
     return " · ".join(parts) + f" · {updated:%m/%d}"
 
 
+NEWS_DAYS = 30
+
+
+def stock_news(code: str, name: str = "") -> str | None:
+    """뉴스·리포트 요약 채널에서 이 종목이 연결된 글(reports/news.py) — 개수 + 가장 최근 제목(원문 링크). 방향 판정 없음."""
+    p = data_dir() / "_reports" / "news.csv"
+    if not p.exists():
+        return None
+    d = pd.read_csv(p, dtype={"code": str}, parse_dates=["date"])
+    if d.empty:
+        return None
+    updated = d["date"].max()
+    g = d[(d["code"] == code) & (d["date"] >= updated - pd.Timedelta(days=NEWS_DAYS))].sort_values(["date", "msg_id"])
+    if g.empty:
+        return f'{NEWS_DAYS}일 없음 <span class="sub">· {updated:%m/%d}</span>'
+    own = g[g["title"].str.contains(name[:2], regex=False)] if name else g     # 제목에 종목명이 나온 글 우선
+    last = (own if len(own) else g).iloc[-1]
+    t = last["title"] if len(last["title"]) <= 42 else last["title"][:41] + "…"
+    ch = last["channel"] if "channel" in last and isinstance(last["channel"], str) else "aicorporateanalysisdeepdive"
+    link = f'https://t.me/{ch}/{int(last["msg_id"])}'
+    return (f'{NEWS_DAYS}일 {len(g)}건 · {last["date"]:%m/%d} <a href="{link}" target="_blank">{html.escape(t)}</a>'
+            f' <span class="sub">· {updated:%m/%d}</span>')
+
+
 def pooled_outcomes() -> dict:
     """전 종목 합산 결과 분포(참고) — results/box_scenario_events.csv."""
     p = results_dir() / "box_scenario_events.csv"
@@ -361,13 +385,13 @@ def plans(bars: pd.DataFrame, st: dict) -> list[dict]:
                     "fixed": st.get("fixed_entry", False), "t2": st.get("t2"), **_st(st)})
     else:
         out.append({"kind": "failure", "entry": L, "stop": L - atr, "target": H, "fixed": False,
-                    "status": "대기", "detail": f"{L:,.0f} 아래 마감 → {FAIL_RECOVER}일 안 복귀 시 진입 (손절은 그때 이탈 저점)"})
+                    "status": "대기", "detail": f"① {L:,.0f} 아래로 마감 ② {FAIL_RECOVER}일 안에 {L:,.0f} 위로 다시 마감 ③ 다음 날 시가 매수 (손절 = 이탈 중 최저가)"})
     if st.get("kind") == "retest":
         out.append({"kind": "retest", "entry": st.get("entry", st["H"]), "stop": st["M"], "target": st["H"] + (st["H"] - st["L"]),
                     "fixed": st.get("fixed_entry", False), **_st(st)})
     else:
         out.append({"kind": "retest", "entry": H, "stop": M, "target": H + (H - L), "fixed": False,
-                    "status": "대기", "detail": f"{H:,.0f} 위 마감 → {RETEST_WITHIN}일 안 되밀려도 종가 {M:,.0f} 위면 진입"})
+                    "status": "대기", "detail": f"① {H:,.0f} 위로 마감 ② {RETEST_WITHIN}일 안에 {H:,.0f}까지 되밀려도 종가가 {M:,.0f} 위 ③ 다음 날 시가 매수"})
     return out
 
 
@@ -442,7 +466,9 @@ def svg_chart(bars: pd.DataFrame, pl: list[dict], ctl: dict, cid: str) -> str:
 NAMES = {"failure": ("가짜 이탈 후 복귀", "Failure"), "retest": ("돌파 후 리테스트", "Not Failure")}
 
 
-BASIS_LABEL = {"hold": "보유 평균가", "now": "현재가 (지금 진입 시)", "plan": "진입 (예상)"}
+BASIS_LABEL = {"hold": "보유 평균가", "now": "지금 가격에 산다면", "plan": "예상 매수가 (조건 충족 시)"}
+BADGE = {"진입 신호": "매수 신호 · 내일 시가", "진행 중": "매수 구간 유지 중", "복귀 대기": "이탈 중 · 복귀 기다림",
+         "리테스트 대기": "돌파 완료 · 되밀림 기다림", "대기": "조건 전"}
 
 
 def plan_card(code: str, p: dict, pooled: dict, sigma: float, close: float, hold: dict | None) -> str:
@@ -457,7 +483,7 @@ def plan_card(code: str, p: dict, pooled: dict, sigma: float, close: float, hold
     rows = [f'<tr><th>{BASIS_LABEL[mode]}</th><td>{ref:,.0f}</td><td class="sub">'
             f'{("현재 " + f"{close / ref - 1:+.1%}") if mode == "hold" else ""}</td></tr>']
     if p["status"] == "진행 중":
-        rows.append(f'<tr class="rule"><th>규칙상 진입</th><td>{p["rule_entry"]:,.0f}</td><td></td></tr>')
+        rows.append(f'<tr class="rule"><th>규칙상 매수가</th><td>{p["rule_entry"]:,.0f}</td><td></td></tr>')
     if z_from <= p["stop"]:
         rows.append(f'<tr><th>손절</th><td class="c-dn">{p["stop"]:,.0f}</td><td class="sub">이미 손절선 아래</td></tr>')
     else:
@@ -486,7 +512,7 @@ def plan_card(code: str, p: dict, pooled: dict, sigma: float, close: float, hold
     return f"""<div class="plan{' active' if active else ''}{' verified' if p.get('t2') else ''}">
       <div class="plan-top"><span class="plan-title">{title}</span><span class="plan-eng">{eng}</span>
         {'<span class="badge vf">검증된 셋업</span>' if p.get('t2') else ''}
-        <span class="badge{' on' if active else ''}">{'규칙 충족' if active else html.escape(p['status'])}</span></div>
+        <span class="badge{' on' if active else ''}">{html.escape(BADGE.get(p['status'], p['status']))}</span></div>
       <p class="detail">{html.escape(p['detail'])}</p>{t2_html}
       <table class="lv">{''.join(rows)}</table>
       {size}
@@ -497,6 +523,60 @@ def plan_card(code: str, p: dict, pooled: dict, sigma: float, close: float, hold
 EVIDENCE_W = {"검증됨": 3.0, "유망": 2.0, "약함": 1.0, "참고": 0.5}   # 검증 등급별 무게(통계 확률이 아니라 등급에 따른 판단값)
 SECTOR_NET_CUT = 0.2        # 섹터 애널리스트 순상향 ±20% 이상이면 방향 근거로 봄
 PANIC_DROP, PANIC_VOL = -0.05, 3.0   # 9.28 투매 정의
+MARKET_TREND_GRADE = "유망"   # 9.37 가설 1 새 표본 재현(차이 +0.44R [+0.06, +0.81])
+MARKET: dict = {"up": None, "date": None, "state": None}   # build() 가 채움: 코스피(069500) 장세
+
+
+def market_state(bars: pd.DataFrame) -> dict | None:
+    """코스피(069500) 장세 — 9.37 정의: 상승장 = 종가 > 60일선 그리고 60일선 상승, 하락장 = 둘 다 반대, 그 외 횡보·전환.
+    며칠째인지와 9.37·9.38 결과에 따른 유리한 시나리오를 함께 돌려준다."""
+    c = bars["close"]
+    if len(c) < 81:
+        return None
+    ma60 = c.rolling(60).mean()
+    up = (c > ma60) & (ma60 > ma60.shift(20))
+    dn = (c < ma60) & (ma60 < ma60.shift(20))
+    state = np.where(up, "상승장", np.where(dn, "하락장", "횡보·전환"))
+    cur = state[-1]
+    days = 1
+    while days < len(state) and state[-1 - days] == cur:
+        days += 1
+    return {"state": str(cur), "days": days, "date": c.index[-1],
+            "vs_ma60": float(c.iloc[-1] / ma60.iloc[-1] - 1), "ma60_slope": float(ma60.iloc[-1] / ma60.iloc[-21] - 1),
+            **REGIME_GUIDE[str(cur)]}
+
+
+# 장세별 한 줄 — 9.37·9.38·9.39·9.40 결과(센서·코스피·코스닥 표본 범위). act = 할 것, nums = 근거 숫자
+REGIME_GUIDE = {
+    "상승장": {"favor": "돌파 매매 ↑ (성장주, 20일선 이탈까지 보유) · 가짜 이탈 쉼",
+              "nums": "돌파 승률 30% · 이긴 +18~23% / 진 −5~7% | 가짜 이탈 기대 ≈ 0"},
+    "횡보·전환": {"favor": "가짜 이탈 ↑ (장세 중 최고) · 돌파 추격 ✕",
+                "nums": "가짜 이탈 +0.5R | 돌파 무작위 수준"},
+    "하락장": {"favor": "가짜 이탈 보통 · 돌파 ✕ · 응축 종목 ✕",
+              "nums": "가짜 이탈 +0.1~0.4R | 돌파 −1~2% | 응축 20일 뒤 −2~3%p"},
+}
+
+
+def market_html(m: dict | None) -> str:
+    if not m:
+        return ""
+    cls = {"상승장": "up", "하락장": "dn"}.get(m["state"], "side")
+    bp = results_dir() / "reports" / "market_brief.json"
+    br = json.loads(bp.read_text(encoding="utf-8")) if bp.exists() else {}
+    brief = (f'<span class="mb">시황 · {br["date"][5:10].replace("-", "/")} {br["kind"]}: '
+             f'<a href="{br["link"]}" target="_blank">{html.escape(br["title"])}</a></span>') if br.get("title") else ""
+    return (f'<div class="market {cls}"><b>코스피 {m["state"]}</b> <span class="md">{m["days"]}일째</span>'
+            f'<span class="mf">{m["favor"]}</span><span class="mx">{m["nums"]}</span>'
+            f'{brief}<span class="mn">60일선 대비 {m["vs_ma60"]:+.1%} · 60일선 20일 {m["ma60_slope"]:+.1%} · {m["date"]:%m/%d} 종가</span></div>')
+
+
+def kospi_uptrend(bars: pd.DataFrame) -> bool | None:
+    """9.37 정의: 종가 > 60일선 그리고 60일선이 20일 전보다 높음."""
+    c = bars["close"]
+    if len(c) < 81:
+        return None
+    ma60 = c.rolling(60).mean()
+    return bool(c.iloc[-1] > ma60.iloc[-1] and ma60.iloc[-1] > ma60.iloc[-21])
 
 
 def sector_net(code: str) -> tuple[str, float] | None:
@@ -532,8 +612,13 @@ def evidence(code: str, bars: pd.DataFrame, st: dict, fl: list, active: list) ->
     a = active[0] if active else None
     if a and a["kind"] == "failure" and a.get("t2"):
         pro.append(("T² 동반 가짜 이탈", "검증됨"))
-    if a and a["kind"] == "retest":
-        pro.append(("돌파 리테스트", "참고"))
+    if a and a["kind"] == "retest":                       # 9.38: 코스피 상승 추세에서만 방향 일치(두 코스피 표본 +0.84·+0.86%p)
+        if MARKET["up"]:
+            pro.append(("돌파 리테스트 · 코스피 상승 추세", "약함"))
+        elif MARKET["up"] is False:
+            con.append(("코스피 상승 추세 아닌 돌파", "약함"))
+    if a and a["kind"] == "failure" and MARKET_TREND_GRADE and MARKET["up"]:
+        con.append(("코스피 상승 추세 중 혼자 이탈", MARKET_TREND_GRADE))
     sn = sector_net(code)
     if sn and abs(sn[1]) >= SECTOR_NET_CUT:
         (pro if sn[1] > 0 else con).append((f"섹터 애널리스트 {sn[1]:+.0%}", "유망"))
@@ -548,6 +633,10 @@ def evidence(code: str, bars: pd.DataFrame, st: dict, fl: list, active: list) ->
         con.append(("·".join(sells) + " 순매도", "약함"))
     if buys:
         pro.append(("·".join(buys) + " 순매수", "약함"))
+    st_m = MARKET.get("state") or {}
+    cs_ = current_state(compression_frame(bars)) if st_m.get("state") == "하락장" else None
+    if cs_ and cs_["compressed"]:                          # 9.39: 하락장 응축은 20일 뒤 평소보다 −1.9~−2.9%p (4표본 CI < 0)
+        con.append(("하락장 응축", "유망"))
     tilt = stock_report_tilt(code)
     if tilt:
         (pro if tilt > 0 else con).append((f"종목 리포트 {'상향' if tilt > 0 else '하향'} 우세", "참고"))
@@ -609,13 +698,16 @@ def guide(bars: pd.DataFrame, st: dict, pl: list[dict], ctl: dict, cs: dict | No
     elif active:
         a = active[0]
         title = NAMES[a["kind"]][0]
-        head = f"{title} · {'내일 진입' if a['status'] == '진입 신호' else '진행 중'}" + (" ★ 검증된 셋업" if a.get("t2") else "")
+        head = (f"{title} · {'복귀 완료 → 내일 시가 매수' if a['status'] == '진입 신호' else '이미 매수 구간 → 지금 가격 매수 가능'}"
+                if a["kind"] == "failure" else
+                f"{title} · {'확인 완료 → 내일 시가 매수' if a['status'] == '진입 신호' else '이미 매수 구간 → 지금 가격 매수 가능'}"
+                ) + (" ★ 검증된 셋업" if a.get("t2") else "")
         if a["kind"] == "failure" and not a.get("t2"):
             lines.append(("info", "T² 없음 — 우위 미확인"))
         z = zs_now(a["stop"])
         rr = (a["target"] - close) / (close - a["stop"]) if close > a["stop"] else None
         if close <= a["stop"]:
-            lines.append(("warn", f"이미 손절선 {a['stop']:,.0f} 아래 — 새 진입 아님"))
+            lines.append(("warn", f"이미 손절선 {a['stop']:,.0f} 아래 — 새로 사지 않음"))
         else:
             lines.append(("warn" if z < 1 else "ok",
                           f"지금 {close:,.0f} → 손절 {a['stop']:,.0f} ({a['stop'] / close - 1:+.1%}, {z:.1f}σ) · 목표 {a['target']:,.0f} "
@@ -624,15 +716,16 @@ def guide(bars: pd.DataFrame, st: dict, pl: list[dict], ctl: dict, cs: dict | No
             lines.append(("size", {**a, "entry": close}))
     else:
         pos = (close - L) / (H - L) if H > L else 0.5
-        head = f"대기 · 박스 {L:,.0f}~{H:,.0f} (위치 {pos:.0%})"
-        lines.append(("info", f"↑ {H:,.0f} 돌파 → 리테스트 · ↓ {L:,.0f} 이탈 → 가짜 이탈"))
+        head = f"아직 매수 신호 없음 · 박스 {L:,.0f}~{H:,.0f} (위치 {pos:.0%})"
+        lines.append(("info", f"매수 조건: ↑ {H:,.0f} 위 마감 후 되밀림 확인(돌파) · ↓ {L:,.0f} 아래 마감 후 {FAIL_RECOVER}일 안 복귀(가짜 이탈)"))
         if st.get("kind") == "failure" and st.get("status") == "복귀 대기":
             lines.append(("warn" if st.get("t2") else "info",
-                          f"{st['b_date']:%m/%d} 이탈 · {'T² 동반 → 복귀하면 ★ 검증된 셋업' if st.get('t2') else 'T² 없음'}"))
+                          f"{st['b_date']:%m/%d} 하단 이탈 중 · {st['L']:,.0f} 위로 마감하면 다음 날 시가 매수"
+                          f"{' · T² 동반 → ★ 검증된 셋업' if st.get('t2') else ' · T² 없음'}"))
     pro, con = evidence(code, bars, st, fl, active)
     lines.append(("evidence", (pro, con)))
     if any(t == "투매 당일" for t, _ in con):
-        lines.append(("warn", "투매 당일 — 복귀 확인 전 진입 보류"))
+        lines.append(("warn", "투매 당일 — 복귀 확인 전 매수 보류"))
     reduce = []
     if cs and cs["compressed"]:
         reduce.append(f"응축 {cs['streak']}일째")
@@ -696,9 +789,12 @@ def stock_section(code: str, name: str, bars: pd.DataFrame, pooled: dict, first:
         val.append(f"PBR {co['pbr']:.2f}" + (f" ({co['pbr_pct']:.0%})" if co["pbr_pct"] is not None else ""))
     ev_txt = " · ".join(f"{d:%m/%d} {n}" for d, n in co["events"]) or "없음"
     sr = stock_reports(code, close)
+    nw = stock_news(code, name)
     nr = co["next_report"]
     nr_txt = f"{nr[0]} ~{nr[1]:%m/%d}" if nr else "–"
-    comp = (f'<span class="c-warn">&#9889; 응축 {cs["streak"]}일째</span>' if cs and cs["compressed"] else '<span class="sub">응축 아님</span>')
+    bear = (MARKET.get("state") or {}).get("state") == "하락장"
+    comp = (f'<span class="c-warn">&#9889; 응축 {cs["streak"]}일째{" · 하락장 → 아래로 풀리기 쉬움" if bear else ""}</span>'
+            if cs and cs["compressed"] else '<span class="sub">응축 아님</span>')
     gd, meta = guide(bars, st, pl, ctl, cs, co, fl, vr, hold, code)
     SUMMARY.append({"code": code, "name": name, "date": f"{bars.index[-1]:%Y-%m-%d}", **meta})
     return f"""<section id="s-{code}" class="stock{' show' if first else ''}">
@@ -728,6 +824,7 @@ def stock_section(code: str, name: str, bars: pd.DataFrame, pooled: dict, first:
     <div class="card co">
       <div class="co-row"><span class="k">밸류</span><span>{' · '.join(val) or '–'}</span></div>
       {f'<div class="co-row"><span class="k">리포트</span><span>{html.escape(sr)}</span></div>' if sr else ''}
+      {f'<div class="co-row"><span class="k">뉴스</span><span>{nw}</span></div>' if nw else ''}
       <div class="co-row"><span class="k">자본 정책 공시(180일)</span><span>{html.escape(ev_txt)}</span></div>
       <div class="co-row"><span class="k">다음 정기보고서</span><span>{html.escape(nr_txt)}</span></div>
     </div>
@@ -750,6 +847,14 @@ PAGE = r"""<!DOCTYPE html>
   .budget input { width:130px; background:var(--bg); color:var(--tx); border:1px solid var(--line); border-radius:6px;
                   padding:6px 8px; font-size:0.95rem; text-align:right; }
   .tabs { display:flex; gap:6px; overflow-x:auto; margin-bottom:12px; }
+  .market { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 10px; border-radius:12px; padding:10px 12px;
+            margin-bottom:8px; font-size:0.85rem; border:1px solid var(--line); background:var(--card); }
+  .market b { font-size:0.95rem; } .market.up b { color:var(--up); } .market.dn b { color:var(--dn); } .market.side b { color:var(--warn); }
+  .market.up { border-color:rgba(52,211,153,.45); } .market.dn { border-color:rgba(248,113,113,.45); } .market.side { border-color:rgba(251,191,36,.45); }
+  .market .md { color:var(--dim); font-size:0.75rem; } .market .mf { color:var(--tx); }
+  .market .mx { flex-basis:100%; color:var(--mut); font-size:0.75rem; }
+  .market .mb { flex-basis:100%; color:var(--mut); font-size:0.75rem; } .market .mb a { color:inherit; border-bottom:1px dotted var(--dim); text-decoration:none; }
+  .market .mn { flex-basis:100%; color:var(--faint); font-size:0.7rem; }
   .tabs button { flex:0 0 auto; background:var(--card); color:var(--mut); border:1px solid var(--line); border-radius:999px;
                  padding:6px 12px; font-size:0.85rem; cursor:pointer; }
   .tabs button.on { color:var(--bg); background:var(--acc); border-color:var(--acc); font-weight:700; }
@@ -798,6 +903,7 @@ PAGE = r"""<!DOCTYPE html>
   .guide .g-info { color:var(--mut); } .guide .g-size { color:var(--tx); } .guide .g-why { color:var(--dim); font-size:0.78rem; }
   .flow .muted { opacity:.75; font-size:0.78rem; line-height:1.5; }
   .co .co-row { display:flex; flex-direction:column; gap:2px; margin-top:8px; font-size:0.85rem; }
+  .co .co-row a { color:inherit; border-bottom:1px dotted #64748b; text-decoration:none; }
   .chart .lv-t { fill:var(--mut); font-size:11px; } .chart .ax { fill:var(--faint); font-size:10px; }
   .plans { display:grid; grid-template-columns:1fr; gap:0 12px; }
   @media (min-width:640px) { .plans { grid-template-columns:1fr 1fr; } .facts { grid-template-columns:1fr 1fr 1fr 1fr; } }
@@ -824,7 +930,8 @@ PAGE = r"""<!DOCTYPE html>
 </style></head>
 <body>
   <h1>박스권 손절·수량</h1>
-  <p class="intro">들어간다면 어디서 끊고 얼마나 살지. 기준가: 보유 = 평균가 · 미보유 = 현재가 · 대기 = 예상 진입가.</p>
+  <p class="intro">들어간다면 어디서 끊고 얼마나 살지. 계산 기준: 보유 = 평균가 · 이미 매수 신호 = 지금 가격 · 신호 전 = 조건 충족 시 예상 매수가.</p>
+  __MARKET__
   <div class="budget"><label for="budget">한 번에 잃어도 되는 금액</label>
     <input id="budget" type="text" inputmode="numeric" value="__BUDGET__"><span>원</span></div>
   <div class="tabs">__TABS__</div>
@@ -844,7 +951,7 @@ PAGE = r"""<!DOCTYPE html>
       거래량도 참고용입니다 — 거래량 실린 돌파·조용한 이탈·위쪽 매물대 모두 기준을 넘지 못했습니다(9.19).</p>
     <p>찬성·반대 무게는 통계로 계산한 확률이 아니라 검증 등급에 따라 정한 값입니다: 검증됨(표본 밖 재현) 3 · 유망(두 표본 일관이나
       간발 미달) 2 · 약함(판정 미달, 방향만 일관) 1 · 참고(검증 안 됨·재현 실패) 0.5. 신뢰 문구는 가장 강한 근거의 등급으로 정합니다.
-      응축·관리선·거래량은 방향이 아니라 수량 조절 항목이라 여기 넣지 않습니다.</p>
+      응축·관리선·거래량은 방향이 아니라 수량 조절 항목이라 여기 넣지 않습니다 — 예외: 코스피 하락장의 응축은 20일 뒤 같은 장세 평소보다 −1.9~−2.9%p로 4개 표본 모두 확실해(9.39) 반대 근거(유망)로 넣습니다. 상승장 응축은 방향이 없었습니다.</p>
     <p>가이드의 "수량 절반"은 응축·거래량 평소 2배 이상·관리선 밖 마감 중 하나라도 해당할 때 적용하는 운영 규칙입니다(겹쳐도 절반).
       응축 뒤 변동이 커진다는 것은 검증됐지만(9.14), 절반이라는 비율 자체는 검증한 값이 아닙니다.</p>
     <p>수급 흐름은 외국인·프로그램 순매수가 평소와 다르게 꾸준히 쌓이는지(CUSUM 경보)만 보여 줍니다. 하루치 수급은 가격과 같은 날에만
@@ -895,7 +1002,8 @@ PAGE = r"""<!DOCTYPE html>
 """
 
 
-def build(codes: list[str], fetch: bool = True, holdings: dict | None = None) -> str:
+def build(codes: list[str], fetch: bool = True, holdings: dict | None = None, out_name: str = "risk_scenarios.html",
+          title: str = "박스권 손절·수량", lead: str = "", summary_name: str = "summary.json") -> str:
     SUMMARY.clear()
     pooled = pooled_outcomes()
     holdings = target_holdings() if holdings is None else holdings
@@ -907,6 +1015,11 @@ def build(codes: list[str], fetch: bool = True, holdings: dict | None = None) ->
     if fetch and caller is None:
         from kis_client import RateLimitedCaller
         caller = RateLimitedCaller()
+    try:                                   # 시장 추세(9.37) — 069500 일봉을 data/_scenario 에 증분 저장
+        _, kb = load_stock("069500", caller)
+        MARKET.update(up=kospi_uptrend(kb), date=kb.index[-1], state=market_state(kb))
+    except Exception as e:
+        print(f"코스피 추세 계산 실패: {e}", file=sys.stderr)
     for i, code in enumerate(codes):
         if fetch:
             refresh_flows(caller, code)
@@ -920,13 +1033,19 @@ def build(codes: list[str], fetch: bool = True, holdings: dict | None = None) ->
         tabs.append(f'<button class="{"on" if i == 0 else ""}" data-target="s-{code}">{html.escape(name)}'
                     f'{" · 보유" if hold else ""}{"<span class=dot></span>" if active else ""}</button>')
         secs.append(stock_section(code, name, bars, pooled, i == 0, hold))
-    page = (PAGE.replace("__TABS__", "".join(tabs)).replace("__SECTIONS__", "".join(secs))
+    m = MARKET.get("state")
+    (results_dir() / "scenario").mkdir(parents=True, exist_ok=True)
+    (results_dir() / "scenario" / "market.json").write_text(json.dumps(
+        {**m, "date": f"{m['date']:%Y-%m-%d}"} if m else {}, ensure_ascii=False), encoding="utf-8")
+    page = (PAGE.replace("<title>박스권 손절·수량</title>", f"<title>{html.escape(title)}</title>")
+            .replace("<h1>박스권 손절·수량</h1>", f"<h1>{html.escape(title)}</h1>")
+            .replace("__MARKET__", market_html(m) + lead).replace("__TABS__", "".join(tabs)).replace("__SECTIONS__", "".join(secs))
             .replace("__BUDGET__", f"{DEFAULT_BUDGET:,}").replace("__BOX__", str(BOX))
             .replace("__GENERATED__", datetime.now(KST).strftime("%Y-%m-%d %H:%M")))
-    out = results_dir() / "scenario" / "risk_scenarios.html"
+    out = results_dir() / "scenario" / out_name
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(page, encoding="utf-8")
-    (out.parent / "summary.json").write_text(json.dumps(SUMMARY, ensure_ascii=False, indent=1), encoding="utf-8")
+    (out.parent / summary_name).write_text(json.dumps(SUMMARY, ensure_ascii=False, indent=1), encoding="utf-8")
     return str(out)
 
 
