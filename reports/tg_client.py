@@ -15,7 +15,8 @@ for _p in (_ROOT, _ROOT / "core"):
 from secrets_loader import get_secret
 
 SESSION = _ROOT / "state" / "telegram_reports"          # Telethon 이 .session 을 붙인다
-CHANNELS = ["butler_works", "ked_epic_ai", "aicorporateanalysisdeepdive", "shmstory"]   # 마지막은 시황(매크로·마감 요약)
+CHANNELS = ["butler_works", "ked_epic_ai", "aicorporateanalysisdeepdive", "shmstory", "darthacking", "easobi"]   # 시황 · 공시(시장조치) · 여론 점수
+RECENT_ONLY = {"darthacking": 90}   # 글이 매우 많은 채널: 처음 대조 때 최근 N일만(이후 새 글만)
 
 
 def client():

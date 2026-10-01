@@ -96,6 +96,8 @@ $rcR = Run-Step "analyst reports (reference)"             "reports\run.py"
 $rc3 = Run-Step "vm_spc champion-challenger + index"       "vm_spc\pipeline.py"
 # 박스권 손절·수량 페이지(scenario_targets.json 종목, 수급 증분 갱신 포함) — 드라이브 동기화 전에 만들어 폰에서도 최신본
 $rcS = Run-Step "scenario risk page"                      "scenario\render_risk.py"
+# 오늘의 후보 200종목 프로그램매매 증분(승률 모형의 이탈일 프로그램 z, 9.79) — 실패해도 후보 페이지는 평균값으로 계산
+$rcG = Run-Step "program trading (screen set, daily)"     "stock_track\collect_program.py" @("--screen")
 # 오늘의 후보: 코스피 시총 상위 200에서 현재 장세 전략표(scenario/screen.py PLAYBOOK)에 맞는 규칙 충족 종목
 $rcC = Run-Step "screen candidates (KOSPI 200)"          "scenario\screen.py"
 
@@ -123,6 +125,15 @@ if (Test-Path "G:\") {
 # 뭐가 됐는지 안 된 건지 아는 게 아무 소식 없는 것보다 낫다).
 $runStatus = if (($rc1 -eq 0) -and ($rc2 -eq 0) -and ($rcD -eq 0) -and ($rcR -eq 0) -and ($rc3 -eq 0) -and ($rcS -eq 0) -and ($rcC -eq 0)) { "ok" } else { "warn" }
 $rc4 = Run-Step "notify_telegram" "vm_spc\notify_telegram.py" @("--run-status", $runStatus)
+
+# 금요일만: 검증용 약 790종목 프로그램매매·신용잔고 증분(한 번 호출에 30일치라 주 1회로 충분, 약 30분) — 알림 뒤에 돌려 지연 없게.
+# 관심 종목·오늘의 후보는 위 페이지 단계가 매일 갱신한다.
+if ((Get-Date).DayOfWeek -eq [DayOfWeek]::Friday) {
+    $rcP = Run-Step "program trading (validation set, weekly)" "stock_track\collect_program.py" @("--validation")
+    $rcK = Run-Step "credit balance (validation set, weekly)"  "stock_track\collect_credit.py" @("--validation")
+    # 검증용 종목 분기 재무(오늘의 후보 돌파 목록의 매출·이익 표시, 9.78) — 약 3분
+    $rcF = Run-Step "DART financials (validation set, weekly)" "dart_events\collect.py" @("--validation")
+}
 
 # 로그 30일 이상 지난 건 정리
 Get-ChildItem -Path $logDir -Filter "pipeline_*.log" |

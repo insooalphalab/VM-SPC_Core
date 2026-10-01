@@ -1,6 +1,9 @@
 """종목별 프로그램매매 일별 순매수 수집 (검증이력 9.21) — KIS 종목별 프로그램매매추이(일별), 1회 30거래일.
 
-  python stock_track/collect_program.py      # 센서 종목 191개, 2021-09~ → data/_program/{code}.csv (처음 약 50분)
+  python stock_track/collect_program.py        # 센서 종목 191개, 2021-09~ → data/_program/{code}.csv (처음 약 50분)
+  python stock_track/collect_program.py --validation [--since=20160101]  # 검증용 약 790종목(기본), 이력 확장 시 --since
+  python stock_track/collect_program.py --screen  # 오늘의 후보 모집단(코스피 시총 상위 200) 매일 증분 — 승률 모형의 이탈일 프로그램 z(9.79)
+  python stock_track/collect_program.py --all  # 전 종목(보통주), 최근 2년~ — 쓰지 않음(사용자 결정: 검증용 종목만)
 저장 열: date, prog_net(프로그램 순매수 대금, 원), value(거래대금, 원). 이미 받은 날짜는 건너뛰고 앞뒤만 채운다.
 """
 from __future__ import annotations
@@ -65,18 +68,18 @@ def fetch(caller: RateLimitedCaller, code: str, until: str, stop_before: str) ->
     return [rows[k] for k in sorted(rows) if k >= stop_before]
 
 
-def update(caller: RateLimitedCaller, code: str) -> int:
+def update(caller: RateLimitedCaller, code: str, start: str = START) -> int:
     until = last_complete_day().strftime("%Y%m%d")          # 장중 오늘 값은 미완성
     have = load_program(code)
     new = []
     if have is None or have.empty:
-        new = fetch(caller, code, until, START)
+        new = fetch(caller, code, until, start)
     else:
         first, last = have.index.min().strftime("%Y%m%d"), have.index.max().strftime("%Y%m%d")
         if last < until:
             new += fetch(caller, code, until, last)
-        if first > START:
-            new += fetch(caller, code, (have.index.min() - timedelta(days=1)).strftime("%Y%m%d"), START)
+        if first > start:
+            new += fetch(caller, code, (have.index.min() - timedelta(days=1)).strftime("%Y%m%d"), start)
     if not new:
         return 0
     df = pd.DataFrame(new)
@@ -91,10 +94,25 @@ def main() -> int:
     sys.stdout.reconfigure(encoding="utf-8")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     caller, t0, failed = RateLimitedCaller(), time.time(), []
-    codes = sorted(sensor_universe())
+    since = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--since=")), None)
+    if "--validation" in sys.argv:                    # 검증용 약 790종목(전 종목은 하지 않음 — 사용자 결정)
+        _sys.path.insert(0, str(_ROOT / "stock_track"))
+        from universe_all import validation_codes
+        codes, start = validation_codes(), since or START
+    elif "--screen" in sys.argv:                      # 오늘의 후보 모집단(코스피 시총 상위 200) — 매일 증분(승률 모형 9.79)
+        _sys.path.insert(0, str(_ROOT / "scenario"))
+        from screen import universe
+        codes, start = [c for c, _ in universe()], START
+    elif "--all" in sys.argv:                         # 코스피·코스닥 전 종목(보통주), 최근 2년~ — 쓰지 않음
+        _sys.path.insert(0, str(_ROOT / "stock_track"))
+        from universe_all import all_common_stocks
+        codes = [c for c, _, _ in all_common_stocks()]
+        start = (datetime.now() - timedelta(days=365 * 2)).strftime("%Y%m%d")
+    else:
+        codes, start = sorted(sensor_universe()), START
     for n, code in enumerate(codes, 1):
         try:
-            update(caller, code)
+            update(caller, code, start)
         except Exception as e:
             failed.append(code)
             log.warning("%s 실패: %s", code, e)

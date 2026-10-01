@@ -17,7 +17,7 @@ import logging
 import sys
 import time
 
-from tg_client import CHANNELS, SESSION, client
+from tg_client import CHANNELS, RECENT_ONLY, SESSION, client
 from v2_config import data_dir
 
 log = logging.getLogger("reports.collect")
@@ -62,8 +62,14 @@ async def _collect(c, channels=None) -> dict:
         if not state.get("reconciled"):
             saved = saved_ids(ch)
             n = 0
+            cutoff = None
+            if ch in RECENT_ONLY:                   # 글이 매우 많은 채널은 최근 N일까지만 거슬러 올라간다
+                from datetime import datetime, timedelta, timezone
+                cutoff = datetime.now(timezone.utc) - timedelta(days=RECENT_ONLY[ch])
             with raw_path(ch).open("a", encoding="utf-8") as f:
                 async for m in c.iter_messages(ch):
+                    if cutoff and m.date < cutoff:
+                        break
                     if m.message and m.id not in saved:
                         f.write(json.dumps({"id": m.id, "date": m.date.isoformat(), "text": m.message}, ensure_ascii=False) + "\n")
                         saved.add(m.id)

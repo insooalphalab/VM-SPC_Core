@@ -32,7 +32,7 @@ from tg_collect import raw_path
 
 log = logging.getLogger("reports.collect_web")
 DEFAULT = ["butler_works", "ked_epic_ai"]
-RECENT_DAYS = {"aicorporateanalysisdeepdive": 90}    # 뉴스 요약 채널: 글이 많아 최근 N일만(그 이전은 필요하면 API로)
+RECENT_DAYS = {"aicorporateanalysisdeepdive": 90, "darthacking": 90}    # 뉴스 요약 채널: 글이 많아 최근 N일만(그 이전은 필요하면 API로)
 PAUSE = 1.0
 UA = {"User-Agent": "Mozilla/5.0 (VM-SPC Core personal research)"}
 

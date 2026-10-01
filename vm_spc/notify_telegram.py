@@ -119,7 +119,7 @@ def build_stock_digest() -> str | None:
             waiting.append(r["name"] + ("" if r["verdict"] == "방향 근거 없음" else f"({r['verdict']})"))
     if waiting:
         lines.append("대기: " + ", ".join(waiting))
-    lines.append("손절·수량 계산은 첨부한 risk_scenarios.html")
+    lines.append("매수·손절 가격은 첨부한 risk_scenarios.html")
     return "\n".join(lines)
 
 
@@ -129,11 +129,14 @@ def build_screen_digest() -> str | None:
     if not p.exists():
         return None
     r = json.loads(p.read_text(encoding="utf-8"))
-    one = lambda x: (x.get("star", "") + x["name"] + (f" {x['win']:.0%}" if x.get("win") is not None else ""))
+    def one(x):
+        dep = x.get("depth")
+        tag = "" if dep is None else f"({dep:.1%} 이탈)" if x.get("star") else f"(⚠얕은 이탈 {dep:.1%})"
+        return (x.get("star") or "") + x["name"] + tag + (f" {x['win']:.0%}" if x.get("win") is not None else "")
     names = lambda xs: ", ".join(one(x) for x in xs) or "없음"
     body = "\n".join(f"{ls['label']}: {names(ls['items'])}" for ls in r.get("lists", []))
     return (f"🔎 오늘의 후보 — 코스피 {r.get('state')} · {r.get('strategy')} (코스피 시총 상위 200)\n{body}\n"
-            "승률 높은 순 · ★ 정상 수량(T² 동반) ☆ 절반 · 규칙 충족 목록, 추천 아님")
+            "승률 높은 순 · ★ 이탈 6%↑ ☆ 3.5~6% (얕은 이탈 제외) · 규칙 충족 목록, 추천 아님")
 
 
 def send_message(text: str) -> None:
@@ -188,7 +191,7 @@ def main() -> int:
         risk_path = results_dir() / "scenario" / "risk_scenarios.html"
         if stock and risk_path.exists():
             send_message(stock)
-            send_document(risk_path, caption="관심 종목 손절·수량 가이드")
+            send_document(risk_path, caption="관심 종목 매수·손절 가이드")
         # 세 번째: 오늘의 후보(코스피 200 스크리닝)
         scr = build_screen_digest()
         scr_path = results_dir() / "scenario" / "screen.html"

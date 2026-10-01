@@ -16,7 +16,7 @@ import logging
 import sys
 
 log = logging.getLogger("reports.run")
-DAILY_CHANNELS = ["butler_works", "aicorporateanalysisdeepdive", "shmstory"]   # API 세션이 없을 때만 쓰는 웹 미리보기 대상
+DAILY_CHANNELS = ["butler_works", "aicorporateanalysisdeepdive", "shmstory", "darthacking"]   # API 세션이 없을 때만 쓰는 웹 미리보기 대상
 
 
 def main() -> int:
@@ -47,6 +47,10 @@ def main() -> int:
     log.info("리포트 %d건", len(df))
     log.info("뉴스 종목 연결 %d건", len(news.build()))
     log.info("시황 한 줄: %s", market_brief.build())
+    import market_actions
+    log.info("시장조치 %d건, 지금 걸려 있음 %d종목", len(market_actions.build()), len(market_actions.active()))
+    import sentiment                            # 여론 점수 표만 갱신(9.41 판단 보류 — 화면에는 안 씀)
+    log.info("여론 점수 %d개", len(sentiment.build()[0]))
     log.info("페이지: %s", render.build())
     return rc
 

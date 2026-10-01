@@ -3,6 +3,7 @@
   python dart_events/collect.py              # 재무·공시·상장주식수 (몇 분)
   python dart_events/collect.py --prices     # + 종목 2015~ 일봉을 data/_long_history/ 에 (처음 한 번, 30분 안팎)
   python dart_events/collect.py --recent     # 매일: 최근 2년 재무·공시만 받아 기존 파일에 합침 + 밸류에이션 갱신
+  python dart_events/collect.py --validation # 검증용 791종목 분기 재무(2015~)만 기존 financials.csv 에 합침 (공시·주식수는 안 건드림)
 
 저장: data/_dart/financials.csv, events.csv, shares.csv. 운영 5년 데이터(data/{바스켓}/)는 건드리지 않는다.
 """
@@ -59,7 +60,7 @@ def _save(new: pd.DataFrame, name: str, keys: list[str], merge: bool) -> pd.Data
     return new
 
 
-def collect_financials(cc: pd.DataFrame, from_year: int = START_YEAR) -> pd.DataFrame:
+def collect_financials(cc: pd.DataFrame, from_year: int = START_YEAR, merge: bool | None = None) -> pd.DataFrame:
     corps = cc["corp_code"].tolist()
     rows, this_year = [], datetime.now(KST).year
     for year in range(from_year, this_year + 1):
@@ -76,7 +77,7 @@ def collect_financials(cc: pd.DataFrame, from_year: int = START_YEAR) -> pd.Data
         log.info("재무 %d년 완료 (누적 %d행)", year, len(rows))
     keys = ["stock_code", "year", "q", "fs_div", "account"]
     df = pd.DataFrame(rows).drop_duplicates(keys, keep="first")
-    return _save(df, "financials.csv", keys, merge=from_year > START_YEAR)
+    return _save(df, "financials.csv", keys, merge=from_year > START_YEAR if merge is None else merge)
 
 
 def collect_events(cc: pd.DataFrame, from_year: int = START_YEAR) -> pd.DataFrame:
@@ -141,7 +142,17 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--prices", action="store_true")
     ap.add_argument("--recent", action="store_true")
+    ap.add_argument("--validation", action="store_true")
     args = ap.parse_args()
+    if args.validation:                                    # 검증 표본(9.62~)용 — 전 종목이 아니라 검증용 791종목만
+        _sys.path.insert(0, str(_ROOT / "stock_track"))
+        from universe_all import validation_codes
+        t0, cc = time.time(), corp_codes()
+        cc = cc[cc["stock_code"].isin(set(validation_codes()))]
+        log.info("검증용 %d종목 분기 재무 수집", len(cc))
+        fin = collect_financials(cc, START_YEAR, merge=True)
+        log.info("완료 — %.1f분, financials.csv %d행 · %d종목", (time.time() - t0) / 60, len(fin), fin["stock_code"].nunique())
+        return 0
     from_year = datetime.now(KST).year - 1 if args.recent else START_YEAR
     t0, uni = time.time(), targets()
     cc = corp_codes()

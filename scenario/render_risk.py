@@ -286,10 +286,11 @@ def flow_states(code: str, index: pd.DatetimeIndex) -> list[tuple[str, str, str]
 
 
 def refresh_flows(caller, code: str) -> None:
-    """목록 종목의 수급·프로그램 일별 데이터를 증분 갱신(몇 콜)."""
+    """목록 종목의 수급·프로그램·신용잔고 일별 데이터를 증분 갱신(몇 콜)."""
+    import collect_credit as cc
     import collect_investor_detail as cid
     import collect_program as cp
-    for mod in (cid, cp):
+    for mod in (cid, cp, cc):
         try:
             mod.update(caller, code)
         except Exception as e:  # 수급 갱신 실패로 페이지 생성을 막지 않는다
@@ -493,17 +494,7 @@ def plan_card(code: str, p: dict, pooled: dict, sigma: float, close: float, hold
         rows.append(f'<tr><th>손익비</th><td colspan="2">1 : {reward / risk:.1f}</td></tr>')
     if zs == zs and zs > 0:
         rows.append(f'<tr><th>손절 거리</th><td>{zs:.1f}σ</td><td class="sub">{"가까움" if zs < 1 else ""}</td></tr>')
-    if mode == "hold":
-        q = hold.get("qty")
-        size = (f'<div class="size-hold"><div class="size-row">보유 {q:,}주 · 현재 손익 '
-                f'<b class="{"c-up" if close >= ref else "c-dn"}">{(close - ref) * q:+,.0f}원</b></div>'
-                f'<div class="size-row sub">손절 시 <span class="c-dn">{(p["stop"] - ref) * q:+,.0f}원</span> · 목표 도달 시 '
-                f'<span class="c-up">{(p["target"] - ref) * q:+,.0f}원</span></div></div>') if q else ""
-    else:
-        size = f"""<div class="size" data-entry="{ref:.2f}" data-stop="{p['stop']:.2f}" data-target="{p['target']:.2f}">
-        <div class="size-row">매수 <b class="qty">–</b>주 · 약 <b class="amt">–</b>원</div>
-        <div class="size-row sub">손절 시 <span class="c-dn loss">–</span> · 목표 도달 시 <span class="c-up gain">–</span></div>
-      </div>"""
+    size = ""                                       # 금액(주수·원) 표시는 하지 않는다 — 비율(%·σ·손익비)만
     po_html = ""
     t2_html = ""
     if p["kind"] == "failure" and p.get("t2") is not None:
@@ -524,6 +515,7 @@ EVIDENCE_W = {"검증됨": 3.0, "유망": 2.0, "약함": 1.0, "참고": 0.5}   #
 SECTOR_NET_CUT = 0.2        # 섹터 애널리스트 순상향 ±20% 이상이면 방향 근거로 봄
 PANIC_DROP, PANIC_VOL = -0.05, 3.0   # 9.28 투매 정의
 MARKET_TREND_GRADE = "유망"   # 9.37 가설 1 새 표본 재현(차이 +0.44R [+0.06, +0.81])
+MARKET_ACTIONS: dict = {}   # build() 가 채움: reports/market_actions.active()
 MARKET: dict = {"up": None, "date": None, "state": None}   # build() 가 채움: 코스피(069500) 장세
 
 
@@ -548,8 +540,8 @@ def market_state(bars: pd.DataFrame) -> dict | None:
 
 # 장세별 한 줄 — 9.37·9.38·9.39·9.40 결과(센서·코스피·코스닥 표본 범위). act = 할 것, nums = 근거 숫자
 REGIME_GUIDE = {
-    "상승장": {"favor": "돌파 매매 ↑ (성장주, 20일선 이탈까지 보유) · 가짜 이탈 쉼",
-              "nums": "돌파 승률 30% · 이긴 +18~23% / 진 −5~7% | 가짜 이탈 기대 ≈ 0"},
+    "상승장": {"favor": "돌파 매매 ↑ (RS 70↑, 50일선 이탈까지 보유) · 가짜 이탈 쉼",
+              "nums": "돌파 승률 17% · +0.45R | 가짜 이탈 기대 ≈ 0"},
     "횡보·전환": {"favor": "가짜 이탈 ↑ (장세 중 최고) · 돌파 추격 ✕",
                 "nums": "가짜 이탈 +0.5R | 돌파 무작위 수준"},
     "하락장": {"favor": "가짜 이탈 보통 · 돌파 ✕ · 응축 종목 ✕",
@@ -617,6 +609,7 @@ def evidence(code: str, bars: pd.DataFrame, st: dict, fl: list, active: list) ->
             pro.append(("돌파 리테스트 · 코스피 상승 추세", "약함"))
         elif MARKET["up"] is False:
             con.append(("코스피 상승 추세 아닌 돌파", "약함"))
+    # 복귀 캔들 종가 위치는 근거로 붙이지 않고 오늘의 후보 승률 모형에 넣었다(9.48)
     if a and a["kind"] == "failure" and MARKET_TREND_GRADE and MARKET["up"]:
         con.append(("코스피 상승 추세 중 혼자 이탈", MARKET_TREND_GRADE))
     sn = sector_net(code)
@@ -713,7 +706,6 @@ def guide(bars: pd.DataFrame, st: dict, pl: list[dict], ctl: dict, cs: dict | No
                           f"지금 {close:,.0f} → 손절 {a['stop']:,.0f} ({a['stop'] / close - 1:+.1%}, {z:.1f}σ) · 목표 {a['target']:,.0f} "
                           f"({a['target'] / close - 1:+.1%}) · 1:{rr:.1f}"
                           + ((" · 손절 가까움 → 수량으로 조절" if a.get("t2") else " · 손절 가까움 → 넓히고 수량 줄이기") if z < 1 else "")))
-            lines.append(("size", {**a, "entry": close}))
     else:
         pos = (close - L) / (H - L) if H > L else 0.5
         head = f"아직 매수 신호 없음 · 박스 {L:,.0f}~{H:,.0f} (위치 {pos:.0%})"
@@ -722,6 +714,10 @@ def guide(bars: pd.DataFrame, st: dict, pl: list[dict], ctl: dict, cs: dict | No
             lines.append(("warn" if st.get("t2") else "info",
                           f"{st['b_date']:%m/%d} 하단 이탈 중 · {st['L']:,.0f} 위로 마감하면 다음 날 시가 매수"
                           f"{' · T² 동반 → ★ 검증된 셋업' if st.get('t2') else ' · T² 없음'}"))
+    ma = MARKET_ACTIONS.get(code)                          # 거래소 시장조치(darthacking) — 손절·가격 제한이 규칙대로 안 될 수 있음
+    if ma:
+        lines.append(("warn", f"거래소 조치 · {ma['date'][5:].replace('-', '/')} {ma['action'][:40]}"
+                              + (" — 손절이 규칙대로 안 될 수 있음" if ma["level"] == "제외" else "")))
     pro, con = evidence(code, bars, st, fl, active)
     lines.append(("evidence", (pro, con)))
     if any(t == "투매 당일" for t, _ in con):
@@ -747,11 +743,7 @@ def guide(bars: pd.DataFrame, st: dict, pl: list[dict], ctl: dict, cs: dict | No
             items.append(evidence_html(*body))
             continue
         if kind == "size":
-            f = REDUCE_FACTOR if reduce else 1.0
-            why = ' <span class="g-why">(절반 적용, 기본 <span class="g-q0">–</span>주)</span>' if reduce else ""
-            items.append(f'<li class="g-size" data-entry="{body["entry"]:.2f}" data-stop="{body["stop"]:.2f}" data-factor="{f}">'
-                         f'<span class="gi">&#8594;</span><span><b class="g-q">–</b>주 · 약 <span class="g-a">–</span>원 '
-                         f'<span class="g-why">(허용 손실 <span class="g-b">–</span>원)</span>{why}</span></li>')
+            continue
         else:
             items.append(f'<li class="g-{kind}"><span class="gi">{icon[kind]}</span>{html.escape(body)}</li>')
     meta = {"head": head, "verdict": evidence_verdict(pro, con), "verified": bool(active and active[0].get("t2")),
@@ -855,11 +847,11 @@ PAGE = r"""<!DOCTYPE html>
   .market .mx { flex-basis:100%; color:var(--mut); font-size:0.75rem; }
   .market .mb { flex-basis:100%; color:var(--mut); font-size:0.75rem; } .market .mb a { color:inherit; border-bottom:1px dotted var(--dim); text-decoration:none; }
   .market .mn { flex-basis:100%; color:var(--faint); font-size:0.7rem; }
-  .tabs button { flex:0 0 auto; background:var(--card); color:var(--mut); border:1px solid var(--line); border-radius:999px;
+  .tabr { position:absolute; opacity:0; pointer-events:none; }
+  .tabs label { flex:0 0 auto; background:var(--card); color:var(--mut); border:1px solid var(--line); border-radius:999px;
                  padding:6px 12px; font-size:0.85rem; cursor:pointer; }
-  .tabs button.on { color:var(--bg); background:var(--acc); border-color:var(--acc); font-weight:700; }
-  .tabs button .dot { display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--warn); margin-left:5px; vertical-align:middle; }
-  .stock { display:none; } .stock.show { display:block; }
+  .tabs label .dot { display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--warn); margin-left:5px; vertical-align:middle; }
+  .stock { display:none; }
   .card, .plan { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:12px; }
   .head { display:flex; justify-content:space-between; align-items:flex-start; }
   .nm { font-weight:700; color:var(--acc); font-size:1.05rem; } .px { font-size:1.2rem; font-weight:700; }
@@ -930,11 +922,9 @@ PAGE = r"""<!DOCTYPE html>
 </style></head>
 <body>
   <h1>박스권 손절·수량</h1>
-  <p class="intro">들어간다면 어디서 끊고 얼마나 살지. 계산 기준: 보유 = 평균가 · 이미 매수 신호 = 지금 가격 · 신호 전 = 조건 충족 시 예상 매수가.</p>
+  <p class="intro">들어간다면 어디서 사고 어디서 끊을지. 계산 기준: 보유 = 평균가 · 이미 매수 신호 = 지금 가격 · 신호 전 = 조건 충족 시 예상 매수가.</p>
   __MARKET__
-  <div class="budget"><label for="budget">한 번에 잃어도 되는 금액</label>
-    <input id="budget" type="text" inputmode="numeric" value="__BUDGET__"><span>원</span></div>
-  <div class="tabs">__TABS__</div>
+  __RADIOS__<div class="tabs">__TABS__</div>
   __SECTIONS__
   <details><summary>근거와 한계</summary>
     <p>박스 = 최근 __BOX__거래일 고가·저가, 중간선 = 그 가운데. 진입은 조건이 나온 다음 날 시가, 같은 날 손절·목표를 둘 다 닿으면
@@ -959,55 +949,16 @@ PAGE = r"""<!DOCTYPE html>
       기울었지만(20일 평균 초과 차이 약 1%p) 판정 기준에는 못 미쳤고, 기관은 연기금·투신·사모 등으로 나눠도 정보가 없었습니다(9.21·9.22).</p>
     <p>생성 __GENERATED__</p>
   </details>
-<script>
-(function () {
-  var fmt = function (v) { return Math.round(v).toLocaleString('ko-KR'); };
-  var input = document.getElementById('budget');
-  function budget() { var v = parseFloat(String(input.value).replace(/[^0-9.]/g, '')); return isFinite(v) && v > 0 ? v : 0; }
-  function update() {
-    var b = budget();
-    document.querySelectorAll('.size').forEach(function (el) {
-      var e = +el.dataset.entry, s = +el.dataset.stop, t = +el.dataset.target, per = e - s;
-      var q = per > 0 ? Math.floor(b / per) : 0;
-      el.querySelector('.qty').textContent = fmt(q);
-      el.querySelector('.amt').textContent = fmt(q * e);
-      el.querySelector('.loss').textContent = '−' + fmt(q * per) + '원';
-      el.querySelector('.gain').textContent = '+' + fmt(q * (t - e)) + '원';
-    });
-    document.querySelectorAll('.g-size').forEach(function (el) {
-      var per = +el.dataset.entry - +el.dataset.stop, q0 = per > 0 ? Math.floor(b / per) : 0;
-      var q = Math.floor(q0 * (+el.dataset.factor || 1));
-      el.querySelector('.g-b').textContent = fmt(b);
-      el.querySelector('.g-q').textContent = fmt(q);
-      el.querySelector('.g-a').textContent = fmt(q * +el.dataset.entry);
-      var z = el.querySelector('.g-q0'); if (z) z.textContent = fmt(q0);
-    });
-    try { localStorage.setItem('risk_budget', String(b)); } catch (e) {}
-  }
-  try { var saved = localStorage.getItem('risk_budget'); if (saved) input.value = fmt(+saved); } catch (e) {}
-  input.addEventListener('input', update);
-  input.addEventListener('blur', function () { input.value = fmt(budget()); });
-  document.querySelectorAll('.tabs button').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      document.querySelectorAll('.tabs button').forEach(function (b) { b.classList.remove('on'); });
-      document.querySelectorAll('.stock').forEach(function (s) { s.classList.remove('show'); });
-      btn.classList.add('on');
-      document.getElementById(btn.dataset.target).classList.add('show');
-    });
-  });
-  update();
-})();
-</script>
 </body></html>
 """
 
 
 def build(codes: list[str], fetch: bool = True, holdings: dict | None = None, out_name: str = "risk_scenarios.html",
-          title: str = "박스권 손절·수량", lead: str = "", summary_name: str = "summary.json") -> str:
+          title: str = "박스권 매수·손절", lead: str = "", summary_name: str = "summary.json") -> str:
     SUMMARY.clear()
     pooled = pooled_outcomes()
     holdings = target_holdings() if holdings is None else holdings
-    tabs, secs = [], []
+    tabs, secs, radios, tab_css = [], [], [], []
     caller = None
     if fetch and any(not in_baskets(c) for c in codes):
         from kis_client import RateLimitedCaller
@@ -1015,6 +966,12 @@ def build(codes: list[str], fetch: bool = True, holdings: dict | None = None, ou
     if fetch and caller is None:
         from kis_client import RateLimitedCaller
         caller = RateLimitedCaller()
+    try:
+        import market_actions
+        MARKET_ACTIONS.clear()
+        MARKET_ACTIONS.update(market_actions.active())
+    except Exception as e:
+        print(f"시장조치 읽기 실패: {e}", file=sys.stderr)
     try:                                   # 시장 추세(9.37) — 069500 일봉을 data/_scenario 에 증분 저장
         _, kb = load_stock("069500", caller)
         MARKET.update(up=kospi_uptrend(kb), date=kb.index[-1], state=market_state(kb))
@@ -1030,8 +987,12 @@ def build(codes: list[str], fetch: bool = True, holdings: dict | None = None, ou
             continue
         active = active_state(bars).get("kind") is not None
         hold = holdings.get(code)
-        tabs.append(f'<button class="{"on" if i == 0 else ""}" data-target="s-{code}">{html.escape(name)}'
-                    f'{" · 보유" if hold else ""}{"<span class=dot></span>" if active else ""}</button>')
+        # 탭은 자바스크립트 없이 동작(숨긴 라디오 + CSS) — 텔레그램·휴대폰 HTML 뷰어는 스크립트를 막는 경우가 있다
+        radios.append(f'<input type="radio" name="stab" class="tabr" id="t-{code}"{" checked" if not radios else ""}>')
+        tabs.append(f'<label for="t-{code}">{html.escape(name)}'
+                    f'{" · 보유" if hold else ""}{"<span class=dot></span>" if active else ""}</label>')
+        tab_css.append(f'#t-{code}:checked ~ #s-{code} {{ display:block; }} '
+                       f'#t-{code}:checked ~ .tabs label[for="t-{code}"] {{ color:var(--bg); background:var(--acc); border-color:var(--acc); font-weight:700; }}')
         secs.append(stock_section(code, name, bars, pooled, i == 0, hold))
     m = MARKET.get("state")
     (results_dir() / "scenario").mkdir(parents=True, exist_ok=True)
@@ -1039,7 +1000,7 @@ def build(codes: list[str], fetch: bool = True, holdings: dict | None = None, ou
         {**m, "date": f"{m['date']:%Y-%m-%d}"} if m else {}, ensure_ascii=False), encoding="utf-8")
     page = (PAGE.replace("<title>박스권 손절·수량</title>", f"<title>{html.escape(title)}</title>")
             .replace("<h1>박스권 손절·수량</h1>", f"<h1>{html.escape(title)}</h1>")
-            .replace("__MARKET__", market_html(m) + lead).replace("__TABS__", "".join(tabs)).replace("__SECTIONS__", "".join(secs))
+            .replace("__MARKET__", market_html(m) + lead).replace("__RADIOS__", "".join(radios) + f'<style>{"".join(tab_css)}</style>').replace("__TABS__", "".join(tabs)).replace("__SECTIONS__", "".join(secs))
             .replace("__BUDGET__", f"{DEFAULT_BUDGET:,}").replace("__BOX__", str(BOX))
             .replace("__GENERATED__", datetime.now(KST).strftime("%Y-%m-%d %H:%M")))
     out = results_dir() / "scenario" / out_name

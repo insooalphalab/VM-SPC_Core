@@ -16,10 +16,13 @@ SPC(칼만·CUSUM·Hotelling T²) 기법을 주가에 적용합니다. 평일 16
 | | 칼만 관리선(±2σ) 기준 "평소 범위", 손절 거리(σ) | 손절·수량 페이지 |
 | **검증된 셋업** (표본 밖 재현) | 개별 종목 가짜 이탈 후 복귀 + 이탈일 T² 관리한계 초과: 무작위 대비 거래당 +1.4~2.0%p, 목표 도달 16~18%(9.27) | 손절·수량 페이지 ★ 표시 |
 | **장세별 차이** (9.37~9.40, 코스피 60일선 기준) | T² 가짜 이탈은 코스피 상승장에서 −0.11R vs 그 외 +0.32R(새 표본 재현) · 하락장 응축은 20일 뒤 −1.9~−2.9%p(4표본) · 가짜 이탈 전체는 조정장, 돌파 리테스트는 상승장에서만 방향 일치 | 두 페이지 맨 위 장세 한 줄, 찬성·반대 근거 |
+| **상승장 돌파 규칙** (9.62·9.68·9.72) | RS 70 이상 종목의 30일 박스 첫 돌파 → 다음 날 시가, 손절 돌파일 종가 − 1ATR, 50일선 이탈까지 보유: 승률 17% · +0.45R (RS 미만 +0.06R, 20일선 청산 +0.27R) | 오늘의 후보 돌파 목록 |
+| **가짜 이탈 승률 모형** (9.45·9.48·9.79) | T² · 장세 · 이탈 깊이 · 복귀 캔들 종가 위치 · 이탈일 프로그램 매도 z, 2021-06 이후 AUC 0.61 | 오늘의 후보 승률, ★ 깊이 6%↑ · ☆ 3.5~6% |
 | **약한 경향** (판정 미달) | T+1 동료 대비 순위 +2.7%p (9.10), 12개월 섹터 모멘텀 (9.16), 외국인 꾸준한 순매수·순매도 CUSUM (9.21) | 흐리게 참고 표시 |
+| | 돌파의 매출 +25% · 4분기 이익 +20%(9.78), 과열 돌파(상단 +4% 초과 마감, R 낮음, 9.67) — 두 기간 같은 방향 | 돌파 목록 칩 |
 | **주의 신호** (두 표본에서 확인) | 투매(−5% · 거래량 3배) 뒤 1~3일 더 약함, 개인만 받은 투매는 더 약함 — 되돌림 없음 (9.28) | 가이드 "투매 당일 — 복귀 확인 전 진입 보류" |
 | **유망, 판단 불가** (간발 미달, 데이터 13개월) | 애널리스트 목표가 순상향 → 섹터 ETF 20일 초과수익, 순위 상관 +0.08 · 상위−하위 1/3 +2.6%p (9.25) | 인덱스 맨 아래 참고 한 줄(업데이트 날짜 표시, 20일 누적이라 천천히 바뀜) |
-| **방향 정보 없음** | 1~20일 ETF·종목 방향, 수급(주체를 나눠도, 9.15·9.22), 프로그램매매, DART 공시 (9.17), T² 없는 가짜 이탈·돌파 리테스트(표본 밖 재현 실패)·거래량·매물대·칼만 관리선 레벨 (9.18~9.19·9.27), 신고가 돌파 (9.20), SPC 이탈 되돌림 (9.14), 섹터 안 대장주 → 후행주 다음 날(같은 날 다 반영, 9.28), 교과서 패턴 4종(깃발·컵앤핸들·역헤드앤숄더·하이 타이트 플래그, 9.29·9.30), 셋업의 손절·익절·조기 청산 변형(모두 현행보다 나쁨, 9.31~9.34) | 표시 안 함 |
+| **방향 정보 없음** | 1~20일 ETF·종목 방향, 수급(주체를 나눠도, 9.15·9.22), 프로그램매매, DART 공시 (9.17), T² 없는 가짜 이탈·돌파 리테스트(표본 밖 재현 실패)·거래량·매물대·칼만 관리선 레벨 (9.18~9.19·9.27), 신고가 돌파 (9.20), SPC 이탈 되돌림 (9.14), 섹터 안 대장주 → 후행주 다음 날(같은 날 다 반영, 9.28), 교과서 패턴 4종(깃발·컵앤핸들·역헤드앤숄더·하이 타이트 플래그, 9.29·9.30), 셋업의 손절·익절·조기 청산 변형(모두 현행보다 나쁨, 9.31~9.34), 돌파의 힘·거래량·베이스 길이·이평선 동시 돌파·RS 가속·다른 진입 방아쇠(20일선·칼만·스윙 고점·변동성 돌파)·익절·본전 손절·나눠 사기·확인 후 매수(9.52~9.77), 신용 급감·프로그램 충격(2016~ 재판정, 9.79) | 표시 안 함 |
 
 추세 추종형(돌파 리테스트·돌파)은 코스피 상승장에서만, 되돌림형(가짜 이탈)은 조정·횡보장에서 됩니다(9.37~9.40). 그래서 두 페이지
 맨 위에 **지금 장세와 그 장세에 맞는 전략**을 한 줄로 보여 줍니다. 이 도구는 **얼마나 움직일지, 어디서 끊을지, 얼마나 살지**를 돕고, 방향은 사람이 판단합니다. 검증 틀 자체는 알려진 5일 단기 되돌림
@@ -36,8 +39,8 @@ SPC(칼만·CUSUM·Hotelling T²) 기법을 주가에 적용합니다. 평일 16
   보유 = 평균가, 이미 매수 신호 = 지금 가격, 신호 전 = 조건 충족 시 예상 매수가. 맨 위에 **코스피 장세 한 줄**(상승장 / 횡보·전환 / 하락장,
   할 것 + 근거 숫자)과 **시황 한 줄**(shmstory 최신 시황 제목), 종목 카드에 리포트·뉴스 한 줄.
 - **`results/scenario/screen.html`**: **오늘의 후보** — 코스피 시총 상위 200에서 지금 장세의 전략표(`scenario/screen.py` PLAYBOOK)에 맞는
-  종목. 시점별 목록(오늘 종가로 완료 → 내일 시가 매수 / 최근 5일 안 완료·아직 유효 → 지금 가격 / 아직 조건 전) 안에서 **승률 높은 순**
-  (T² 동반·장세·목표 거리가 같은 과거 사건 묶음, 평소 승률 병기), ★ 정상 수량(T² 동반·상승장 아님) · ☆ 절반. 카드는 위 페이지와 같은 양식.
+  종목(상승장 = RS 70↑ 돌파, 그 외 = 가짜 이탈). 시점별 목록(오늘 종가로 완료 → 내일 시가 매수 / 최근 5일 안 완료·아직 유효 → 지금 가격 /
+  아직 조건 전) 안에서 **승률 높은 순**(위 승률 모형, 평소 승률 병기). 얕은 이탈(3.5% 미만)·거래소 조치 종목은 뺌. 탭은 자바스크립트 없이 동작.
 
 ## 빠른 시작
 
@@ -63,12 +66,13 @@ python vm_spc/pipeline.py                                          # 챔피언-�
 1. `vm_predict/v2_run.py`: 일봉 증분 수집(최근 15일, 수정주가 소급 조정이 감지되면 그 종목만 재수집) → 연산 → 대시보드
 2. `pair_spc/run_pair_spc.py`: 대표종목 공적분 SPC
 3. `dart_events/collect.py --recent`: DART 최근 2년 재무·공시 + PER/PBR
-4. `reports/run.py`: 텔레그램 4개 채널 새 글(로그인 세션이 있으면 API, 없으면 웹 미리보기) → 리포트 표·종목 뉴스 표·시황 한 줄·섹터 리포트 흐름
+4. `reports/run.py`: 텔레그램 6개 채널 새 글(로그인 세션이 있으면 API, 없으면 웹 미리보기) → 리포트 표·종목 뉴스 표·시황 한 줄·섹터 리포트 흐름
 5. `vm_spc/pipeline.py`: 챔피언-챌린저 → `index.html`
-6. `scenario/render_risk.py`: 손절·수량 가이드 페이지(목록 종목 수급 증분 갱신 포함, 인덱스 상단에 링크)
-   → `scenario/screen.py`: 오늘의 후보(코스피 시총 상위 200)
+6. `scenario/render_risk.py`: 손절·수량 가이드 페이지(목록 종목 수급·신용 증분 갱신 포함, 인덱스 상단에 링크)
+   → `stock_track/collect_program.py --screen`(후보 200종목 프로그램매매 증분) → `scenario/screen.py`: 오늘의 후보(코스피 시총 상위 200)
 7. `results/` → `G:\내 드라이브\VM-SPC_Core` 미러링, `basket_watchlist.json`·`scenario_targets.json` 백업
 8. `vm_spc/notify_telegram.py`: ① ETF 요약 + `index.html`, ② 관심 종목 전략 요약(장세·시황 한 줄 + 종목당 한 줄) + `risk_scenarios.html`, ③ 오늘의 후보(목록별 승률 순) + `screen.html` 전송(같은 거래일은 생략, 앞 단계 실패 시 경고)
+9. 금요일만: 검증용 790종목 프로그램매매 · 신용잔고 · DART 분기 재무 증분(`--validation`, 약 30분)
 
 주의:
 - 스케줄러는 PowerShell을 VBScript로 창 없이 띄웁니다. `powershell -WindowStyle Hidden`은 창이 보이고, 클릭하면 프로세스가 멈춥니다.
@@ -82,12 +86,12 @@ python vm_spc/pipeline.py                                          # 챔피언-�
 | 예측모델 (VM-SPC) | `python vm_predict/v2_run.py [--basket 이름] [--no-fetch]` | 매일 실행 |
 | 챔피언-챌린저 | `python vm_spc/pipeline.py [--basket 이름]` | 매일 실행, 9.10 |
 | PAIR-SPC | `python pair_spc/run_pair_spc.py` | 매일 실행 |
-| DART | `python dart_events/collect.py --recent` · `valuation.py` | 첫 수집은 `--prices`(약 35분), 9.17 |
+| DART | `python dart_events/collect.py --recent` · `--validation`(검증용 790종목 분기 재무, 약 3분) · `valuation.py` | 첫 수집은 `--prices`(약 35분), 9.17 · 실적 성장 계산 `growth.py`(9.78) |
 | 손절·수량 페이지 | `python scenario/render_risk.py [종목코드 ...] [--no-fetch]` | 매일 실행, 수급 증분 갱신 포함 |
 | 오늘의 후보 | `python scenario/screen.py [--no-fetch]` | 매일 실행. 전략표 = 파일 안 `PLAYBOOK`(장세별 규칙 목록) |
-| 텔레그램 수집·파싱 | `python reports/run.py` · `tg_login.py`(첫 로그인, 사용자) · `tg_collect.py` · `parse.py` · `news.py` · `market_brief.py` · `render.py` | 매일 실행. 채널: butler_works · ked_epic_ai(리포트), aicorporateanalysisdeepdive(뉴스), shmstory(시황) |
+| 텔레그램 수집·파싱 | `python reports/run.py` · `tg_login.py`(첫 로그인, 사용자) · `tg_collect.py` · `parse.py` · `news.py` · `market_brief.py` · `market_actions.py` · `sentiment.py` · `render.py` | 매일 실행. 채널: butler_works · ked_epic_ai(리포트), aicorporateanalysisdeepdive(뉴스), shmstory(시황), darthacking(거래소 조치 → 후보 제외), easobi(심리, 표시 안 함) |
 | 후보 승률표 | `python research/build_winrate_table.py` | 몇 달에 한 번 갱신(약 15분) |
-| 수급·프로그램매매 수집 | `python stock_track/collect_investor_detail.py` · `collect_program.py` | 첫 수집 각 약 45분, 이후 페이지가 목록 종목만 증분 |
+| 수급·프로그램매매·신용 수집 | `python stock_track/collect_investor_detail.py` · `collect_program.py` · `collect_credit.py` [`--validation [--since=20160101]` · `--screen`] · `collect_market_program.py` | 검증용 790종목만(전 종목은 하지 않음). 2016~ 이력 확장은 약 4.5시간 |
 | ETF 순위 / 종목 추적 | `python etf_rank/run.py [--dry]` · `python stock_track/run.py [--no-fetch]` | 수동, 화면에서는 뺌(9.12 · 9.7) |
 | 바스켓 후보 스캔 | `python core/v2_etf_scanner.py [--limit 60]` | 결과 `basket_watchlist.scanned.json`은 검토 후 직접 옮김 |
 | 5년 이력 확장 | `python vm_predict/backfill_history.py` | 1회 |
@@ -109,6 +113,10 @@ python vm_spc/pipeline.py                                          # 챔피언-�
 | 셋업 손절 · 익절 · 약한 20일선 청산 | `validate_stops.py` · `validate_targets.py` · `validate_weak_touch.py` | 9.31 · 9.32 · 9.34 |
 | 꺾이는 거래 · 안 뜨는 거래 탐색 | `explore_reversal.py` · `explore_nolift.py [--oos]` | 9.33 · 9.35 |
 | 코스피 장세 가설 · 반려 전략 장세별 · 응축 장세별 · 추세 추종 돌파 | `validate_market_trend.py` · `validate_regime.py` · `validate_compression_regime.py` · `validate_breakout_trend.py` | 9.37~9.40 |
+| 가짜 이탈 보조 신호(심리·신용·프로그램·조합·복귀 기한·차익) | `validate_sentiment.py` · `validate_credit_failure.py` · `validate_program_shock.py` · `validate_signal_combo.py` · `validate_recover_window.py` · `validate_market_arb.py` · `validate_program_flip.py` (`--hist` = 2016~ 재판정) | 9.41~9.51 · 9.79 |
+| 돌파 강도·재돌파·유지·손절·포켓 피봇·섹터·종목 지속성 | `validate_breakout_edge.py` · `validate_breakout_r.py` · `validate_rebreakout.py` · `validate_breakout_hold.py` · `validate_breakout_stop_h.py` · `validate_pocket_pivot[_stops].py` · `validate_industry_action.py` | 9.52~9.61 |
+| 추세추종 원칙(RS·2단계·신저가·윗꼬리) · RS 변형 · 베이스 · 마진 | `validate_trend_principles.py` · `validate_rs_divergence.py` · `validate_rs_accel.py` · `validate_rs_rising.py` · `validate_base_duration.py` · `validate_breakout_margin.py` | 9.62~9.67 |
+| 진입 방아쇠(20일선·칼만·스윙·변동성) · 청산 · 다음날 대응 · 나눠 사기 · 확인 매수 · 이평 동시 돌파 · 거래량 · 실적 | `validate_entry_trigger.py` · `validate_kalman_breakout.py` · `validate_swing_breakout.py` · `validate_vbo.py` · `validate_breakout_exits.py` · `validate_day1_response.py` · `validate_pyramid.py` · `validate_confirm_entry.py` · `validate_confluence.py` · `validate_breakout_volume.py` · `validate_earnings_growth.py` | 9.68~9.78 |
 
 ## 폴더
 
@@ -117,11 +125,11 @@ core/         공용 인프라: KIS 인증·클라이언트, 설정(Params), 칼
 vm_predict/   예측모델: 수집 → 연산 → 대시보드, 괴리율·응축·신뢰도(v2_premium / v2_compression / v2_reliability)
 vm_spc/       챔피언-챌린저(Walk-Forward + 게이트), index.html, 텔레그램
 pair_spc/     대표종목 실증 + 공적분 SPC
-dart_events/  DART 재무·공시 수집, PER/PBR 상태
+dart_events/  DART 재무·공시 수집, PER/PBR 상태, 실적 성장(growth.py)
 scenario/     손절·수량 가이드 페이지, 오늘의 후보(screen.py), 박스 규칙·T² 판정(box_rules.py — 검증과 화면이 같이 씀)
-stock_track/  수급·프로그램매매 수집, 수급 CUSUM 정의(flow_alarm.py), 종목 추적(역방향, 수동)
+stock_track/  수급·프로그램매매·신용 수집, 검증용 종목 목록(universe_all.py), 수급 CUSUM 정의(flow_alarm.py), 종목 추적(역방향, 수동)
 etf_rank/     섹터 ETF 순위(수동, 화면 제외)
-reports/      텔레그램 4개 채널 수집(API, 없으면 웹)·리포트/뉴스 파싱·시황 한 줄·섹터 리포트 흐름
+reports/      텔레그램 6개 채널 수집(API, 없으면 웹)·리포트/뉴스 파싱·시황 한 줄·거래소 조치·섹터 리포트 흐름
 research/     결론이 난 검증 스크립트(재현용)
 scripts/      매일 자동 실행(VBS + PowerShell)
 data/ results/ state/ logs/   자동 생성물(.gitignore)
