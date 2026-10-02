@@ -81,6 +81,15 @@ def design(d: pd.DataFrame) -> np.ndarray:
                  np.clip(d["depth"].to_numpy(float), 0, DEPTH_CAP), d["cpos"].to_numpy(float), d["prog_z"].to_numpy(float)]
 
 
+RECENT = pd.Timestamp("2021-06-01")        # 9.85 최근경향: 횡보·전환 가짜 이탈은 2021-06 이후만 플러스(두 반쪽 모두)
+
+
+def design_recent(d: pd.DataFrame) -> np.ndarray:
+    """화면용 전체 기간 모형 = 기본 설계 + 최근(2021-06~) × 횡보·전환. 오늘 판정은 최근=1 로 계산한다."""
+    rs = ((d["entry_date"] >= RECENT) & (d["reg"] == "횡보·전환")).astype(float).to_numpy()
+    return np.c_[design(d), rs]
+
+
 def fit_logit(X: np.ndarray, y: np.ndarray) -> np.ndarray:
     b = np.zeros(X.shape[1])
     for _ in range(100):
@@ -105,10 +114,16 @@ def calibration(d: pd.DataFrame, b: np.ndarray) -> dict:
     return {"구간별": rows, "AUC": round(float(auc), 3), "Brier": round(float(np.mean((p - y) ** 2)), 4)}
 
 
+def pf(R: pd.Series) -> float | None:
+    """수익 배수 = 이긴 거래 R 합 ÷ 진 거래 R 합(절댓값) — 승률과 손익비를 한 숫자로(사용자 요청, 2026-10-02)."""
+    loss = -R[R <= 0].sum()
+    return round(float(R[R > 0].sum() / loss), 2) if loss > 0 else None
+
+
 def cell(g: pd.DataFrame) -> dict:
     net = g["ret"] - COST
-    return {"n": int(len(g)), "win": round(float((net > 0).mean()), 3),
-            "R": round(float((net / g["stop_pct"].clip(lower=0.01)).mean()), 2),
+    R = net / g["stop_pct"].clip(lower=0.01)
+    return {"n": int(len(g)), "win": round(float((net > 0).mean()), 3), "R": round(float(R.mean()), 2), "pf": pf(R),
             "ctrl_win": round(float(g["ctrl_win"].mean()), 3)}
 
 
@@ -119,11 +134,12 @@ def breakout_rs() -> dict:
         return {}
     d = pd.read_csv(f)
     d = d[d["rs"] >= 0.70]
-    out = {r: {"n": int(len(g)), "win": round(float(g["win"].mean()), 3), "R": round(float(g["R"].mean()), 2)} for r, g in d.groupby("reg")}
+    out = {r: {"n": int(len(g)), "win": round(float(g["win"].mean()), 3), "R": round(float(g["R"].mean()), 2), "pf": pf(g["R"])} for r, g in d.groupby("reg")}
     ex = results_dir() / "breakout_exits_events.csv"                  # 9.72: 상승장 돌파는 50일선 청산 규칙의 승률·R
     if ex.exists():
         e = pd.read_csv(ex)
-        out["상승장"] = {"n": int(len(e)), "win": round(float(e["E2 50일선|win"].mean()), 3), "R": round(float(e["E2 50일선|R"].mean()), 2)}
+        out["상승장"] = {"n": int(len(e)), "win": round(float(e["E2 50일선|win"].mean()), 3), "R": round(float(e["E2 50일선|R"].mean()), 2),
+                       "pf": pf(e["E2 50일선|R"].dropna())}
     return out
 
 
@@ -144,8 +160,8 @@ def main() -> int:
     half = d["entry_date"] < pd.Timestamp("2021-06-01")
     b_train = fit_logit(design(d[half]), y[half.to_numpy()])
     cal = calibration(d[~half], b_train)                        # 앞 절반으로 맞추고 뒤 절반으로 확인
-    b_all = fit_logit(design(d), y)                             # 화면에 쓰는 계수는 전체 기간
-    model = {"features": ["상수", "T2", *REGS, f"깊이(상한 {DEPTH_CAP:.0%})", "복귀 캔들 종가 위치", "이탈일 프로그램 비중 z"], "coef": [round(float(x), 4) for x in b_all],
+    b_all = fit_logit(design_recent(d), y)                      # 화면에 쓰는 계수는 전체 기간 + 최근경향 항(9.85)
+    model = {"features": ["상수", "T2", *REGS, f"깊이(상한 {DEPTH_CAP:.0%})", "복귀 캔들 종가 위치", "이탈일 프로그램 비중 z", "최근경향: 최근 × 횡보·전환"], "coef": [round(float(x), 4) for x in b_all],
              "cpos_mean": round(float(d["cpos"].mean()), 3), "prog_z_mean": round(float(d["prog_z"].mean()), 3),
              "coef_train_2016_2021": [round(float(x), 4) for x in b_train], "depth_cap": DEPTH_CAP,
              "검증_2021_06_이후": cal, "n": int(len(d))}
@@ -154,7 +170,8 @@ def main() -> int:
     bo = vbt.run(codes, reg, rng)
     bo["stop_pct"] = bo["stop_pct"]
     breakout = {r: {"n": int(len(g)), "win": round(float((g["net"] > 0).mean()), 3),
-                    "R": round(float((g["net"] / g["stop_pct"].clip(lower=0.01)).mean()), 2)} for r, g in bo.groupby("reg")}
+                    "R": round(float((g["net"] / g["stop_pct"].clip(lower=0.01)).mean()), 2),
+                    "pf": pf(g["net"] / g["stop_pct"].clip(lower=0.01))} for r, g in bo.groupby("reg")}
     out = {"made": pd.Timestamp.now().strftime("%Y-%m-%d"), "tgt_cut": [round(q1, 4), round(q2, 4)], "model": model,
            "failure": fail, "failure_coarse": fail_coarse, "breakout": breakout, "breakout_rs": breakout_rs(),
            "note": "센서 191 + 코스피 1~400, 2016~. 승률 = 비용 0.3% 뺀 수익 > 0. ctrl_win = 같은 손절·목표 거리 무작위 진입 승률"}

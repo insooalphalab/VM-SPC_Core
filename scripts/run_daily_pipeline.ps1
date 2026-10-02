@@ -126,13 +126,16 @@ if (Test-Path "G:\") {
 $runStatus = if (($rc1 -eq 0) -and ($rc2 -eq 0) -and ($rcD -eq 0) -and ($rcR -eq 0) -and ($rc3 -eq 0) -and ($rcS -eq 0) -and ($rcC -eq 0)) { "ok" } else { "warn" }
 $rc4 = Run-Step "notify_telegram" "vm_spc\notify_telegram.py" @("--run-status", $runStatus)
 
-# 금요일만: 검증용 약 790종목 프로그램매매·신용잔고 증분(한 번 호출에 30일치라 주 1회로 충분, 약 30분) — 알림 뒤에 돌려 지연 없게.
+# 금요일만(급하지 않은 수집은 모두 여기로): 검증용 약 790종목 프로그램매매·신용잔고 증분(한 번 호출에 30일치라 주 1회로 충분, 약 30분) — 알림 뒤에 돌려 지연 없게.
 # 관심 종목·오늘의 후보는 위 페이지 단계가 매일 갱신한다.
 if ((Get-Date).DayOfWeek -eq [DayOfWeek]::Friday) {
     $rcP = Run-Step "program trading (validation set, weekly)" "stock_track\collect_program.py" @("--validation")
     $rcK = Run-Step "credit balance (validation set, weekly)"  "stock_track\collect_credit.py" @("--validation")
     # 검증용 종목 분기 재무(오늘의 후보 돌파 목록의 매출·이익 표시, 9.78) — 약 3분
     $rcF = Run-Step "DART financials (validation set, weekly)" "dart_events\collect.py" @("--validation")
+    # 화면엔 안 쓰지만 수급 재검증 · 최근경향 연 1회 재판정용(9.82 · 9.99 · 9.84) — 센서 191종목 투자자별 증분 + 코스피 시장 투자자별(2015~ 다시 받음), 몇 분
+    $rcI = Run-Step "investor detail (sensor set, weekly)"     "stock_track\collect_investor_detail.py"
+    $rcM = Run-Step "market investor flows (KOSPI, weekly)"    "stock_track\collect_market_investor.py"
 }
 
 # 로그 30일 이상 지난 건 정리

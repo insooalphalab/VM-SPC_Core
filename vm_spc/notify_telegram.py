@@ -24,6 +24,8 @@ import logging
 import sys
 from datetime import datetime
 
+import time
+
 import requests
 
 from secrets_loader import get_secret
@@ -100,8 +102,8 @@ def build_stock_digest() -> str | None:
     rows = json.loads(p.read_text(encoding="utf-8"))
     if not rows:
         return None
-    rank = lambda r: (not r["verified"], not r["panic"], not (r["active"] or r["hold"]))
-    lines = [f"🎯 관심 종목 전략 — {rows[0]['date'][5:].replace('-', '/')} 종가"]
+    rank = lambda r: (not r["hold"], not r["verified"], not r["panic"], not r["active"])
+    lines = [f"🎯 보유·관심 종목 — {rows[0]['date'][5:].replace('-', '/')} 종가"]
     mp = results_dir() / "scenario" / "market.json"
     m = json.loads(mp.read_text(encoding="utf-8")) if mp.exists() else {}
     if m.get("state"):
@@ -112,7 +114,9 @@ def build_stock_digest() -> str | None:
         lines.append(f"📰 시황({br['date'][5:10].replace('-', '/')} {br['kind']}): {br['title']}")
     waiting = []
     for r in sorted(rows, key=rank):
-        if r["verified"] or r["panic"] or r["active"] or r["hold"]:
+        if r["hold"]:
+            lines.append(f"🔹 {r['name']}: {r['head'].removeprefix('보유 · ')}")
+        elif r["verified"] or r["panic"] or r["active"]:
             mark = "★" if r["verified"] else "⚠" if r["panic"] else "•"
             lines.append(f"{mark} {r['name']}: {r['head']} ({r['verdict']})")
         else:
@@ -139,22 +143,40 @@ def build_screen_digest() -> str | None:
             "승률 높은 순 · ★ 이탈 6%↑ ☆ 3.5~6% (얕은 이탈 제외) · 규칙 충족 목록, 추천 아님")
 
 
+def _retry(fn, tries: int = 3):
+    """연결이 잠깐 끊겨도(2026-10-02 ConnectionResetError로 세 번째 메시지 누락) 5 · 15초 쉬고 다시 시도."""
+    for k in range(tries):
+        try:
+            return fn()
+        except requests.exceptions.RequestException:
+            if k == tries - 1:
+                raise
+            log.warning("텔레그램 전송 실패 — %d초 뒤 다시 시도", (5, 15)[k])
+            time.sleep((5, 15)[k])
+
+
 def send_message(text: str) -> None:
     token = get_secret("TELEGRAM_BOT_TOKEN")
     chat_id = get_secret("TELEGRAM_CHAT_ID")
-    r = requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
-                      data={"chat_id": chat_id, "text": text}, timeout=15)
-    r.raise_for_status()
+
+    def go():
+        r = requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
+                          data={"chat_id": chat_id, "text": text}, timeout=15)
+        r.raise_for_status()
+    _retry(go)
 
 
 def send_document(path: _Path, caption: str = "") -> None:
     token = get_secret("TELEGRAM_BOT_TOKEN")
     chat_id = get_secret("TELEGRAM_CHAT_ID")
-    with open(path, "rb") as f:
-        r = requests.post(f"https://api.telegram.org/bot{token}/sendDocument",
-                          data={"chat_id": chat_id, "caption": caption},
-                          files={"document": (path.name, f, "text/html")}, timeout=30)
-    r.raise_for_status()
+
+    def go():
+        with open(path, "rb") as f:
+            r = requests.post(f"https://api.telegram.org/bot{token}/sendDocument",
+                              data={"chat_id": chat_id, "caption": caption},
+                              files={"document": (path.name, f, "text/html")}, timeout=30)
+        r.raise_for_status()
+    _retry(go)
 
 
 def main() -> int:
@@ -163,6 +185,7 @@ def main() -> int:
     ap.add_argument("--run-status", choices=["ok", "warn"], default="ok",
                     help="warn 이면 파이프라인 단계 실패가 있었다는 경고를 메시지 맨 위에 붙인다")
     ap.add_argument("--force", action="store_true", help="새 거래일이 없어도 전송")
+    ap.add_argument("--only", choices=["etf", "stock", "screen"], help="한 묶음만 다시 보낼 때(전송 실패 복구용)")
     args = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -179,6 +202,19 @@ def main() -> int:
     latest = _latest_data_date()
     if args.run_status == "ok" and not args.force and latest and _read_state() == latest:
         log.info("새 거래일 없음(최신 %s, 이미 알림) — 전송 생략", latest)
+        return 0
+
+    if args.only:                                           # 빠진 묶음만 다시 — 마지막 알림 기록은 건드리지 않음
+        if args.only == "etf":
+            send_message(digest)
+            send_document(results_dir() / "index.html", caption="전체 ETF 현황")
+        elif args.only == "stock":
+            send_message(build_stock_digest())
+            send_document(results_dir() / "scenario" / "risk_scenarios.html", caption="관심 종목 매수·손절 가이드")
+        else:
+            send_message(build_screen_digest())
+            send_document(results_dir() / "scenario" / "screen.html", caption="오늘의 후보 — 관심 종목과 같은 양식")
+        log.info("텔레그램 %s 다시 보냄", args.only)
         return 0
 
     try:

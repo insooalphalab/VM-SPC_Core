@@ -36,6 +36,7 @@ MASTER_URL = "https://new.real.download.dws.co.kr/common/master/kospi_code.mst.z
 MASTER = _ROOT / "state" / "kospi_code_master.txt"
 TOP_N, PICK = 200, 5
 HOT_MARGIN = 0.04    # 돌파일 종가가 상단 +4% 넘게 마감 = 과열 표시(9.67, 방향만 일치 → 약함 근거로 표시만)
+WIDE_BOX = 0.204     # 30일 박스 폭(H ÷ L − 1) 상승장 돌파 상위 1/3 경계 — 최근경향(9.85)
 RS_CUT = 0.70        # 돌파 목록은 RS 등급 70 이상만(9.62: 상승장 +0.27R vs 나머지 +0.06R, 2021 이후 차이 +0.32R)
 
 
@@ -75,7 +76,8 @@ def breakout_first(bars, st):
         return None
     tr = np.maximum(h[-14:] - l[-14:], np.maximum(abs(h[-14:] - c[-15:-1]), abs(l[-14:] - c[-15:-1])))
     stop = c[-1] - tr.mean()
-    return {"t2": False, "score": c[-1] / H - 1, "margin": c[-1] / H - 1, "kind": "breakout", "info": f"종가 {c[-1]:,.0f} · 손절 {stop:,.0f} · 50일선 이탈 시 정리",
+    width = H / l[-BOX - 1:-1].min() - 1
+    return {"t2": False, "score": float(width > WIDE_BOX) - (c[-1] / H - 1), "margin": c[-1] / H - 1, "width": width, "kind": "breakout", "info": f"종가 {c[-1]:,.0f} · 손절 {stop:,.0f} · 50일선 이탈 시 정리",
             "why": f"상단 {H:,.0f} 첫 돌파 · 손절 {stop:,.0f} · 50일선 이탈까지 보유"}
 
 
@@ -118,7 +120,8 @@ def breakout_recent(bars, st):
             if l[t + 1:].min() <= stop or (c[t + 1:] < ma50[t + 1:]).any():
                 return None
             gain = c[-1] / H - 1
-            return {"t2": False, "score": -gain, "margin": c[t] / H - 1, "kind": "breakout",
+            width = H / l[t - BOX:t].min() - 1
+            return {"t2": False, "score": float(width > WIDE_BOX) - gain, "margin": c[t] / H - 1, "width": width, "kind": "breakout",
                     "info": f"{bars.index[t]:%m/%d} 돌파 · 상단 대비 {gain:+.1%} · 손절 {stop:,.0f} · 50일선 이탈 시 정리",
                     "why": f"{bars.index[t]:%m/%d} 첫 돌파 · 상단 {H:,.0f} 대비 지금 {gain:+.1%} · 손절 {stop:,.0f} · 50일선 이탈까지 보유"}
     return None
@@ -154,10 +157,10 @@ def not_compressed(bars) -> bool:
 
 # ── 장세별 전략표 — 검증이력 근거와 함께. 새 전략이 검증되면 여기 한 줄 ─────────────────────────────
 PLAYBOOK = {
-    "상승장": {"strategy": "돌파", "why": "상승장 RS 70↑ 돌파: 승률 17% · +0.45R, 50일선까지 보유 — 자주 작게 지고 가끔 크게 번다(9.62·9.72), 리테스트 방향 일치(9.38)",
+    "상승장": {"strategy": "돌파", "why": "상승장 RS 70↑ 돌파: 승률 17% · +0.45R · ×1.5, 50일선까지 보유 — 자주 작게 지고 가끔 크게 번다(9.62·9.72), 리테스트 방향 일치(9.38)",
               "lists": [("돌파 완료(오늘 종가) → 내일 시가 매수", breakout_first), ("최근 5일 안 돌파 완료 · 아직 유효 → 지금 가격 매수 가능", breakout_recent),
                         ("리테스트 확인 완료(오늘 종가) → 내일 시가 매수", retest_entry)], "filter": None},
-    "횡보·전환": {"strategy": "가짜 이탈", "why": "횡보·전환 가짜 이탈 +0.5R — 장세 중 최고(9.37·9.38)",
+    "횡보·전환": {"strategy": "가짜 이탈", "why": "횡보·전환 가짜 이탈 — 최근경향 +0.58R(9.85)",
                 "lists": [("복귀 완료(오늘 종가) → 내일 시가 매수", failure_entry), ("최근 5일 안 복귀 완료 · 아직 유효 → 지금 가격 매수 가능", failure_recent),
                           ("아직 이탈 중 → 하단 위로 마감하면 다음 날 매수", failure_wait)], "filter": None},
     "하락장": {"strategy": "가짜 이탈 (응축 종목 제외)", "why": "하락장 가짜 이탈 +0.1~0.4R, 응축 종목은 20일 뒤 −2~3%p라 제외(9.39)",
@@ -214,7 +217,7 @@ def rate(x: dict, state: str, table: dict | None) -> dict:
     별점 = 이탈 깊이: ★ 6% 이상 · ☆(반 개) 3.5~6% · 3.5% 미만은 별 없이 경고. 돌파 목록은 깊이가 없어 별 없음."""
     dep = x.get("depth")
     star = "" if dep is None else "★" if dep >= FULL_STAR else "☆" if dep >= HALF_STAR else ""
-    out = {"star": star, "win": None, "R": None, "ctrl_win": None, "n_hist": 0}
+    out = {"star": star, "win": None, "R": None, "pf": None, "ctrl_win": None, "n_hist": 0}
     if not table:
         return out
     if x.get("kind") in ("breakout", "retest"):
@@ -228,17 +231,18 @@ def rate(x: dict, state: str, table: dict | None) -> dict:
         if not c or c["n"] < 100:                                  # 표본이 작으면 목표 거리 구분 없이
             c = table["failure_coarse"].get(key)
     if c:
-        out.update(win=c["win"], R=c["R"], ctrl_win=c.get("ctrl_win"), n_hist=c["n"])
+        out.update(win=c["win"], R=c["R"], pf=c.get("pf"), ctrl_win=c.get("ctrl_win"), n_hist=c["n"])
     m = table.get("model")
     if m and dep is not None and x.get("kind") not in ("breakout", "retest"):
         z = (m["coef"][0] + m["coef"][1] * float(x["t2"]) + m["coef"][2] * (state == "횡보·전환") + m["coef"][3] * (state == "하락장")
              + m["coef"][4] * min(max(dep, 0.0), m["depth_cap"])
              + (m["coef"][5] * (x["cpos"] if x.get("cpos") is not None else m.get("cpos_mean", 0.75)) if len(m["coef"]) > 5 else 0.0)
-             + (m["coef"][6] * (x["prog_z"] if x.get("prog_z") is not None else m.get("prog_z_mean", 0.0)) if len(m["coef"]) > 6 else 0.0))
+             + (m["coef"][6] * (x["prog_z"] if x.get("prog_z") is not None else m.get("prog_z_mean", 0.0)) if len(m["coef"]) > 6 else 0.0)
+             + (m["coef"][7] * (state == "횡보·전환") if len(m["coef"]) > 7 else 0.0))       # 최근경향(9.85): 오늘은 최근 구간
         out["win"] = round(1 / (1 + np.exp(-z)), 3)
         coarse = table["failure_coarse"].get(f"{'T2' if x['t2'] else '-'}|{state}")
         if coarse:
-            out.update(R=coarse["R"], ctrl_win=coarse.get("ctrl_win"), n_hist=coarse["n"])
+            out.update(R=coarse["R"], pf=coarse.get("pf"), ctrl_win=coarse.get("ctrl_win"), n_hist=coarse["n"])
     return out
 
 
@@ -256,7 +260,7 @@ def scan(fetch: bool) -> dict:
     found = [[] for _ in play["lists"]]
     import market_actions
     acts = market_actions.active()
-    skipped, rs = [], {}
+    skipped, rs, trend_raw = [], {}, {}
     for code, name in uni:
         if acts.get(code, {}).get("level") == "제외":        # 거래소 조치 중(투자경고·단기과열·실질심사 등) — 손절이 규칙대로 안 될 수 있어 제외
             skipped.append(name)
@@ -269,6 +273,7 @@ def scan(fetch: bool) -> dict:
         if len(bars) < 300 or (play["filter"] and not play["filter"](bars)):
             continue
         rs[code] = rs_raw(bars)
+        trend_raw[code] = rr.trend_components(bars, code)
         st = rr.active_state(bars)
         for i, (_, fn) in enumerate(play["lists"]):
             x = fn(bars, st)
@@ -277,6 +282,7 @@ def scan(fetch: bool) -> dict:
             if x:
                 found[i].append({"code": code, "name": name, **x})
     rs_pct = pd.Series({k: v for k, v in rs.items() if v is not None}).rank(pct=True)
+    pd.DataFrame(trend_raw).T.to_csv(results_dir() / "scenario" / "trend_xs.csv")   # 리스크 시나리오의 추세 강도 순위 기준(9.81·9.85)
     try:                                                     # 실적 성장 표시(9.78, 방향만 일치 → 약함) — DART 재무 없으면 생략
         from growth import features as growth_features, load_tables
         ni_t, rev_t = load_tables()
@@ -318,6 +324,8 @@ def lead_html(r: dict) -> str:
             out.append('<i class="c t2">T²</i>')
         if x.get("kind") == "breakout" and x.get("rs") is not None:
             out.append(f'<i class="c good">RS {x["rs"] * 100:.0f}</i>')
+        if x.get("kind") == "breakout" and x.get("width", 0) > WIDE_BOX:
+            out.append('<i class="c good">넓은 박스 · 최근경향</i>')
         g = x.get("growth") or {}
         if g.get("c_rev") == 1:
             out.append(f'<i class="c good">매출 +{g["rev_g"]:.0%}</i>')
@@ -331,8 +339,9 @@ def lead_html(r: dict) -> str:
         if x.get("win") is None:
             win = '<div class="w"></div>'
         else:
+            ev = f'<span>{x["R"]:+.2f}R · ×{x["pf"]:.1f}</span>' if x.get("R") is not None and x.get("pf") else ""   # 기대값 · 수익 배수
             base = f'<span>평소 {x["ctrl_win"]:.0%}</span>' if x.get("ctrl_win") is not None else ""
-            win = f'<div class="w"><b>{x["win"]:.0%}</b>{base}</div>'
+            win = f'<div class="w"><b>{x["win"]:.0%}</b>{ev}{base}</div>'
         return (f'<li><span class="st">{x.get("star") or ""}</span><div class="m"><div class="n"><b>{html.escape(x["name"])}</b>'
                 f'{chips(x)}</div><div class="i">{html.escape(x.get("info", ""))}</div></div>{win}</li>')
 
@@ -346,12 +355,13 @@ def lead_html(r: dict) -> str:
     legend = (f'<details class="scr-n"><summary>표시 읽는 법</summary>'
               f'<p>전략: {html.escape(r["strategy"])} — {html.escape(r["why"])}. 코스피 시총 상위 {TOP_N}, 거래소 조치 중 '
               f'{len(r.get("skipped", []))}종목 제외. 규칙 충족 목록이며 추천이 아닙니다.</p>'
-              f'<p>오른쪽 큰 숫자 = 승률(T² 동반·장세·이탈 깊이·복귀 캔들·이탈일 프로그램 매도 로지스틱 모형, 비용 뺀 수익 > 0, 9.45·9.48·9.79), 아래 = 같은 T²·장세에서 무작위로 '
-              f'샀을 때. 목록 안 순서 = 승률 높은 순.</p>'
+              f'<p>오른쪽 = 승률(큰 숫자) · 기대값 R · ×수익 배수 · 평소 승률. 승률은 T² 동반·장세·이탈 깊이·복귀 캔들·이탈일 프로그램 매도 로지스틱 모형'
+              f'(비용 뺀 수익 > 0, 9.45·9.48·9.79), R과 수익 배수(이긴 거래 R 합 ÷ 진 거래 R 합, 1보다 크면 남는 규칙)는 같은 T²·장세 사건 묶음, '
+              f'평소 = 같은 T²·장세에서 무작위로 샀을 때. 목록 안 순서 = 승률 높은 순.</p>'
               f'<p>★ 이탈 6% 이상 · ☆ 3.5~6% · 3.5% 미만 얕은 이탈은 승률이 평소와 거의 같아 목록에서 뺌(9.43) · T² = 이탈일 다변량 관리한계 초과'
               f'(검증된 셋업). 복귀 캔들 종가 위치는 승률 모형 안에 반영(9.48), 아직 복귀 전이면 평균값으로 계산.</p>'
               f'<p>RS = 3·6·9·12개월 가중 수익률의 후보 종목 안 백분위. 돌파는 RS 70 이상만 표시(9.62), 승률·R도 그 묶음 기준. 과열 = 돌파일 종가가 상단 +4% 초과 — R이 낮은 쪽(9.67, 약함). '
-              f'매출 = 최근 분기 매출 전년 대비 +25% 이상, 이익 = 최근 4분기 순이익 전년 대비 +20% 이상(DART, 9.78 약함 — 두 기간 모두 R이 높은 쪽).</p></details>')
+              f'매출 = 최근 분기 매출 전년 대비 +25% 이상, 이익 = 최근 4분기 순이익 전년 대비 +20% 이상(DART, 9.78 약함 — 두 기간 모두 R이 높은 쪽). 최근경향 뜻은 맨 아래 "근거와 한계".</p></details>')
     return (f'<div class="scr-wrap">{"".join(block(ls) for ls in r["lists"])}{legend}</div>'
             '<style>.scr-wrap{display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:12px}'
             '@media(min-width:900px){.scr-wrap{grid-template-columns:1fr 1fr 1fr}}'
@@ -364,7 +374,7 @@ def lead_html(r: dict) -> str:
             '.scr .n{display:flex;flex-wrap:wrap;align-items:center;gap:4px;font-size:0.88rem}'
             '.scr .i{font-size:0.7rem;color:var(--faint);margin-top:1px}'
             '.scr .w{text-align:right;line-height:1.1}.scr .w b{display:block;font-size:1.05rem;color:var(--acc)}'
-            '.scr .w span{font-size:0.65rem;color:var(--dim)}'
+            '.scr .w span{display:block;font-size:0.65rem;color:var(--dim)}'
             '.scr .c{font-style:normal;font-size:0.66rem;padding:0 5px;border-radius:999px;border:1px solid var(--line);color:var(--mut)}'
             '.scr .c.good{color:var(--up);border-color:rgba(52,211,153,.5)}.scr .c.mid{color:var(--warn);border-color:rgba(251,191,36,.5)}'
             '.scr .c.bad{color:var(--dn);border-color:rgba(248,113,113,.5)}.scr .c.t2{color:var(--acc);border-color:rgba(103,232,249,.5)}'
